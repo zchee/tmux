@@ -391,6 +391,7 @@ enum tty_code_code {
 	TTYC_VPA,	/* row_address, cv */
 	TTYC_XENL,	/* eat_newline_glitch, xn */
 	TTYC_XT,	/* xterm(1)-compatible title, XT */
+	TTYC_TC,	/* 24-bit "true" colour, Tc */
 };
 
 /* Message codes. */
@@ -643,16 +644,31 @@ enum utf8_state {
 #define GRID_FLAG_BG256 0x2
 #define GRID_FLAG_PADDING 0x4
 #define GRID_FLAG_EXTENDED 0x8
+#define GRID_FLAG_FGRGB 0x10
+#define GRID_FLAG_BGRGB 0x20
 
 /* Grid line flags. */
 #define GRID_LINE_WRAPPED 0x1
+
+/* Grid cell RGB colours. */
+struct grid_cell_rgb {
+	u_char	r;
+	u_char	g;
+	u_char	b;
+};
 
 /* Grid cell data. */
 struct grid_cell {
 	u_char			flags;
 	u_char			attr;
-	u_char			fg;
-	u_char			bg;
+	union {
+		u_char		fg;
+		struct grid_cell_rgb	fg_rgb;
+	};
+	union {
+		u_char		bg;
+		struct grid_cell_rgb	bg_rgb;
+	};
 	struct utf8_data	data;
 
 };
@@ -1984,6 +2000,12 @@ char	*grid_string_cells(struct grid *, u_int, u_int, u_int,
 void	 grid_duplicate_lines(struct grid *, u_int, struct grid *, u_int,
 	     u_int);
 u_int	 grid_reflow(struct grid *, struct grid *, u_int);
+u_char	 grid_cell_rgb_equal(struct grid_cell_rgb, struct grid_cell_rgb);
+u_char	 grid_cell_fg_flags_equal(u_char, u_char);
+u_char	 grid_cell_bg_flags_equal(u_char, u_char);
+u_char	 grid_cell_fg_equal(const struct grid_cell *, const struct grid_cell *);
+u_char	 grid_cell_bg_equal(const struct grid_cell *, const struct grid_cell *);
+u_char	 grid_cell_colours_equal(const struct grid_cell *, const struct grid_cell *);
 
 /* grid-view.c */
 void	 grid_view_get_cell(struct grid *, u_int, u_int, struct grid_cell *);

@@ -877,3 +877,39 @@ grid_reflow(struct grid *dst, struct grid *src, u_int new_x)
 		return (0);
 	return (sy - py);
 }
+
+u_char
+grid_cell_rgb_equal(struct grid_cell_rgb x, struct grid_cell_rgb y) {
+	return x.r == y.r && x.b == y.b && x.g == y.g;
+}
+
+u_char
+grid_cell_fg_flags_equal(u_char x, u_char y) {
+	return ((x ^ y) & (GRID_FLAG_FG256|GRID_FLAG_FGRGB)) == 0;
+}
+
+u_char
+grid_cell_bg_flags_equal(u_char x, u_char y) {
+	return ((x ^ y) & (GRID_FLAG_BG256|GRID_FLAG_BGRGB)) == 0;
+}
+
+u_char
+grid_cell_fg_equal(const struct grid_cell *gc, const struct grid_cell *tc) {
+	return grid_cell_fg_flags_equal(gc->flags, tc->flags) &&
+		(gc->flags & GRID_FLAG_FGRGB
+		 ? grid_cell_rgb_equal(gc->fg_rgb, tc->fg_rgb)
+		 : gc->fg == tc->fg);
+}
+
+u_char
+grid_cell_bg_equal(const struct grid_cell *gc, const struct grid_cell *tc) {
+	return grid_cell_bg_flags_equal(gc->flags, tc->flags) &&
+		(gc->flags & GRID_FLAG_BGRGB
+		 ? grid_cell_rgb_equal(gc->bg_rgb, tc->bg_rgb)
+		 : gc->bg == tc->bg);
+}
+
+u_char
+grid_cell_colours_equal(const struct grid_cell *gc, const struct grid_cell *tc) {
+	return grid_cell_fg_equal(gc, tc) && grid_cell_bg_equal(gc, tc);
+}
