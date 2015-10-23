@@ -1627,12 +1627,10 @@ input_csi_dispatch_sgr_256(struct input_ctx *ictx, int fgbg, u_int *i)
 	c = input_get(ictx, *i, 0, -1);
 	if (c == -1) {
 		if (fgbg == 38) {
-			gc->flags &= ~GRID_FLAG_FG256;
-			gc->flags &= ~GRID_FLAG_FGRGB;
+			gc->flags &= ~(GRID_FLAG_FG256|GRID_FLAG_FGRGB);
 			gc->fg = 8;
 		} else if (fgbg == 48) {
-			gc->flags &= ~GRID_FLAG_BG256;
-			gc->flags &= ~GRID_FLAG_BGRGB;
+			gc->flags &= ~(GRID_FLAG_BG256|GRID_FLAG_BGRGB);
 			gc->bg = 8;
 		}
 	} else {
@@ -1761,13 +1759,11 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 		case 35:
 		case 36:
 		case 37:
-			gc->flags &= ~GRID_FLAG_FG256;
-			gc->flags &= ~GRID_FLAG_FGRGB;
+			gc->flags &= ~(GRID_FLAG_FG256|GRID_FLAG_FGRGB);
 			gc->fg = n - 30;
 			break;
 		case 39:
-			gc->flags &= ~GRID_FLAG_FG256;
-			gc->flags &= ~GRID_FLAG_FGRGB;
+			gc->flags &= ~(GRID_FLAG_FG256|GRID_FLAG_FGRGB);
 			gc->fg = 8;
 			break;
 		case 40:
@@ -1778,13 +1774,11 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 		case 45:
 		case 46:
 		case 47:
-			gc->flags &= ~GRID_FLAG_BG256;
-			gc->flags &= ~GRID_FLAG_BGRGB;
+			gc->flags &= ~(GRID_FLAG_BG256|GRID_FLAG_BGRGB);
 			gc->bg = n - 40;
 			break;
 		case 49:
-			gc->flags &= ~GRID_FLAG_BG256;
-			gc->flags &= ~GRID_FLAG_BGRGB;
+			gc->flags &= ~(GRID_FLAG_BG256|GRID_FLAG_BGRGB);
 			gc->bg = 8;
 			break;
 		case 90:
@@ -1795,7 +1789,7 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 		case 95:
 		case 96:
 		case 97:
-			gc->flags &= ~GRID_FLAG_FG256;
+			gc->flags &= ~(GRID_FLAG_FG256|GRID_FLAG_FGRGB);
 			gc->fg = n;
 			break;
 		case 100:
@@ -1806,8 +1800,7 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 		case 105:
 		case 106:
 		case 107:
-			gc->flags &= ~GRID_FLAG_BG256;
-			gc->flags &= ~GRID_FLAG_BGRGB;
+			gc->flags &= ~(GRID_FLAG_BG256|GRID_FLAG_BGRGB);
 			gc->bg = n - 10;
 			break;
 		}
