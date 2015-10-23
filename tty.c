@@ -38,7 +38,7 @@ void	tty_error_callback(struct bufferevent *, short, void *);
 
 void	tty_set_italics(struct tty *);
 int	tty_try_256(struct tty *, u_char, const char *);
-int	tty_try_rgb(struct tty *, struct grid_cell_colour_rgb, const char *);
+int	tty_try_rgb(struct tty *, struct grid_cell_rgb, const char *);
 
 void	tty_colours(struct tty *, const struct grid_cell *);
 void	tty_check_fg(struct tty *, struct grid_cell *);
@@ -1425,7 +1425,7 @@ tty_colours(struct tty *tty, const struct grid_cell *gc)
 {
 	struct grid_cell	*tc = &tty->cell;
 	u_char			 fg = gc->fg, bg = gc->bg, flags = gc->flags;
-	struct grid_cell_colour_rgb fg_rgb = gc->fg_rgb, bg_rgb = gc->bg_rgb;
+	struct grid_cell_rgb	 fg_rgb = gc->fg_rgb, bg_rgb = gc->bg_rgb;
 	int			 have_ax, fg_default, bg_default;
 
 	/* No changes? Nothing is necessary. */
@@ -1723,7 +1723,7 @@ fallback:
 }
 
 int
-tty_try_rgb(struct tty *tty, struct grid_cell_colour_rgb rgb, const char *type)
+tty_try_rgb(struct tty *tty, struct grid_cell_rgb rgb, const char *type)
 {
 	char	s[32];
 

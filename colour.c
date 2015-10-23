@@ -421,7 +421,7 @@ colour_fromstring(const char *s)
 		n = sscanf(s + 1, "%2hhx%2hhx%2hhx", &r, &g, &b);
 		if (n != 3)
 			return (-1);
-		/* TODO: store into a grid_cell_colour_rgb struct */
+		/* TODO: store into a grid_cell_rgb struct */
 		return (colour_find_rgb(r, g, b) | 0x100);
 	}
 
