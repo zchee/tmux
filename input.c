@@ -1651,7 +1651,7 @@ void
 input_csi_dispatch_sgr_rgb(struct input_ctx *ictx, int fgbg, u_int *i)
 {
 	struct grid_cell	*gc = &ictx->cell.cell;
-	int			 c, r, g, b;
+	int			 r, g, b;
 
 	(*i)++;
 	r = input_get(ictx, *i, 0, -1);
