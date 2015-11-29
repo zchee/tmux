@@ -643,8 +643,6 @@ enum utf8_state {
 #define GRID_FLAG_BG256 0x2
 #define GRID_FLAG_PADDING 0x4
 #define GRID_FLAG_EXTENDED 0x8
-#define GRID_FLAG_EXTENDED 0x8
-#define GRID_FLAG_EXTENDED 0x10
 
 /* Grid line flags. */
 #define GRID_LINE_WRAPPED 0x1
@@ -660,17 +658,17 @@ struct grid_cell_rgb {
 struct grid_cell {
 	u_char			flags;
 	u_char			attr;
+	u_char			fg;
+	u_char			bg;
 	struct utf8_data	data;
 	union {
-		u_char			fg;
 		struct grid_cell_rgb	fg_rgb;
 	};
 	union {
-		u_char			bg;
 		struct grid_cell_rgb	bg_rgb;
 	};
-
 };
+
 struct grid_cell_entry {
 	u_char			flags;
 	union {
