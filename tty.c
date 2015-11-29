@@ -1447,8 +1447,8 @@ tty_colours(struct tty *tty, const struct grid_cell *gc)
 	 * case if only one is default need to fall onward to set the other
 	 * colour.
 	 */
-	fg_default = (fg == 8 && !(flags & GRID_FLAG_FG256|GRID_FLAG_EXTENDED));
-	bg_default = (bg == 8 && !(flags & GRID_FLAG_BG256|GRID_FLAG_EXTENDED));
+	fg_default = (fg == 8 && !(flags & (GRID_FLAG_FG256|GRID_FLAG_EXTENDED)));
+	bg_default = (bg == 8 && !(flags & (GRID_FLAG_BG256|GRID_FLAG_EXTENDED)));
 	if (fg_default || bg_default) {
 		/*
 		 * If don't have AX but do have op, send sgr0 (op can't
@@ -1470,6 +1470,7 @@ tty_colours(struct tty *tty, const struct grid_cell *gc)
 					tty_putcode1(tty, TTYC_SETAF, 7);
 				tc->fg = 8;
 				tc->flags &= ~(GRID_FLAG_FG256|GRID_FLAG_EXTENDED);
+				tty_reset(tty);
 			}
 			if (bg_default &&
 			    (tc->bg != 8 || tc->flags & (GRID_FLAG_BG256|GRID_FLAG_EXTENDED))) {
@@ -1480,6 +1481,7 @@ tty_colours(struct tty *tty, const struct grid_cell *gc)
 					tty_putcode1(tty, TTYC_SETAB, 0);
 				tc->bg = 8;
 				tc->flags &= ~(GRID_FLAG_BG256|GRID_FLAG_EXTENDED);
+				tty_reset(tty);
 			}
 		}
 	}
