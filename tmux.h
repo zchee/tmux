@@ -387,11 +387,11 @@ enum tty_code_code {
 	TTYC_SMSO,	/* enter_standout_mode, so */
 	TTYC_SMUL,	/* enter_underline_mode, us */
 	TTYC_SS,	/* set cursor style, Ss */
+	TTYC_TC,	/* 24-bit "true" colour, Tc */
 	TTYC_TSL,	/* to_status_line, tsl */
 	TTYC_VPA,	/* row_address, cv */
 	TTYC_XENL,	/* eat_newline_glitch, xn */
 	TTYC_XT,	/* xterm(1)-compatible title, XT */
-	TTYC_TC,	/* 24-bit "true" colour, Tc */
 };
 
 /* Message codes. */
