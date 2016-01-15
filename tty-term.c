@@ -254,11 +254,11 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_SMSO] = { TTYCODE_STRING, "smso" },
 	[TTYC_SMUL] = { TTYCODE_STRING, "smul" },
 	[TTYC_SS] = { TTYCODE_STRING, "Ss" },
+	[TTYC_TC] = { TTYCODE_FLAG, "Tc" },
 	[TTYC_TSL] = { TTYCODE_STRING, "tsl" },
 	[TTYC_VPA] = { TTYCODE_STRING, "vpa" },
 	[TTYC_XENL] = { TTYCODE_FLAG, "xenl" },
 	[TTYC_XT] = { TTYCODE_FLAG, "XT" },
-	[TTYC_TC] = { TTYCODE_FLAG, "Tc" },
 };
 
 u_int
