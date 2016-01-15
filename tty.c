@@ -1498,7 +1498,7 @@ tty_check_fg(struct tty *tty, struct grid_cell *gc)
 		/*
 		 * And not a 24-bit terminal? Translate to 256-colour palette.
 		 */
-		if (!tty_term_has(tty->term, TTYC_TC)) {
+		if (!tty_term_flag(tty->term, TTYC_TC)) {
 			gc->flags &= ~GRID_FLAG_FGRGB;
 			gc->flags |= ~GRID_FLAG_FG256;
 			gc->fg = colour_find_rgb(gc->fg_rgb.r, gc->fg_rgb.g, gc->fg_rgb.b);
@@ -1543,7 +1543,7 @@ tty_check_bg(struct tty *tty, struct grid_cell *gc)
 		/*
 		 * And not a 24-bit terminal? Translate to 256-colour palette.
 		 */
-		if (!tty_term_has(tty->term, TTYC_TC)) {
+		if (!tty_term_flag(tty->term, TTYC_TC)) {
 			gc->flags &= ~GRID_FLAG_BGRGB;
 			gc->flags |= ~GRID_FLAG_BG256;
 			gc->bg = colour_find_rgb(gc->bg_rgb.r, gc->bg_rgb.g, gc->bg_rgb.b);
@@ -1707,7 +1707,7 @@ tty_try_rgb(struct tty *tty, struct grid_cell_rgb rgb, const char *type)
 {
 	char	s[32];
 
-	if (!tty_term_has(tty->term, TTYC_TC))
+	if (!tty_term_flag(tty->term, TTYC_TC))
 		return (-1);
 
 	xsnprintf(s, sizeof s, "\033[%s;2;%hhu;%hhu;%hhum", type, rgb.r, rgb.g, rgb.b);
