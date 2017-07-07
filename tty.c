@@ -899,8 +899,8 @@ tty_draw_line(struct tty *tty, const struct window_pane *wp,
 	 * there may be empty background cells after it (from BCE).
 	 */
 	sx = screen_size_x(s);
-	if (sx > s->grid->linedata[s->grid->hsize + py].cellsize)
-		sx = s->grid->linedata[s->grid->hsize + py].cellsize;
+	if (sx > s->grid->linedata[s->grid->hsize + py].cellused)
+		sx = s->grid->linedata[s->grid->hsize + py].cellused;
 	if (sx > tty->sx)
 		sx = tty->sx;
 
