@@ -598,6 +598,15 @@ tty_term_create(struct tty *tty, char *name, int *feat, int fd, char **cause)
 	if (!tty_term_flag(term, TTYC_XENL))
 		term->flags |= TERM_NOXENL;
 
+#ifndef NO_USE_PANE_BORDER_ACS_ASCII
+	/* Generate ACS table. */
+	memset(term->acs, 0, sizeof term->acs);
+	if (tty_term_has(term, TTYC_ACSC)) {
+		acs = tty_term_string(term, TTYC_ACSC);
+		for (; acs[0] != '\0' && acs[1] != '\0'; acs += 2)
+			term->acs[(u_char) acs[0]][0] = acs[1];
+	}
+#else
 	/* Generate ACS table. If none is present, use nearest ASCII. */
 	memset(term->acs, 0, sizeof term->acs);
 	if (tty_term_has(term, TTYC_ACSC))
@@ -606,6 +615,7 @@ tty_term_create(struct tty *tty, char *name, int *feat, int fd, char **cause)
 		acs = "a#j+k+l+m+n+o-p-q-r-s-t+u+v+w+x|y<z>~.";
 	for (; acs[0] != '\0' && acs[1] != '\0'; acs += 2)
 		term->acs[(u_char) acs[0]][0] = acs[1];
+#endif
 
 	/* Log the capabilities. */
 	for (i = 0; i < tty_term_ncodes(); i++)

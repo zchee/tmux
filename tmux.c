@@ -307,19 +307,28 @@ main(int argc, char **argv)
 {
 	char					*path = NULL, *label = NULL;
 	char					*cause, **var;
+#ifndef NO_USE_UTF8CJK
+	char					*ctype;
+#endif
 	const char				*s, *shell, *cwd;
 	int					 opt, flags = 0, keys;
 	int					 feat = 0;
 	const struct options_table_entry	*oe;
 
+#ifdef NO_USE_UTF8CJK
 	if (setlocale(LC_CTYPE, "en_US.UTF-8") == NULL &&
 	    setlocale(LC_CTYPE, "C.UTF-8") == NULL) {
 		if (setlocale(LC_CTYPE, "") == NULL)
+#else
+		if ((ctype = setlocale(LC_CTYPE, "")) == NULL)
+#endif
 			errx(1, "invalid LC_ALL, LC_CTYPE or LANG");
 		s = nl_langinfo(CODESET);
 		if (strcasecmp(s, "UTF-8") != 0 && strcasecmp(s, "UTF8") != 0)
 			errx(1, "need UTF-8 locale (LC_CTYPE) but have %s", s);
+#ifdef NO_USE_UTF8CJK
 	}
+#endif
 
 	setlocale(LC_TIME, "");
 	tzset();
@@ -450,6 +459,14 @@ main(int argc, char **argv)
 		options_set_number(global_w_options, "mode-keys", keys);
 	}
 
+#ifndef NO_USE_UTF8CJK
+	if (!strncmp(ctype, "ja", 2) || !strncmp(ctype, "ko", 2) || !strncmp(ctype, "zh", 2)) {
+		options_set_number(global_options, "utf8-cjk", 1);
+	} else {
+		options_set_number(global_options, "utf8-cjk", 0);
+	}
+#endif
+
 	/*
 	 * If socket is specified on the command-line with -S or -L, it is
 	 * used. Otherwise, $TMUX is checked and if that fails "default" is
@@ -474,6 +491,11 @@ main(int argc, char **argv)
 	}
 	socket_path = path;
 	free(label);
+
+#ifndef NO_USE_FIX_NOEPOLL
+	/* Set the environment variable EVENT_NOEPOLL to "1" certainly. */
+	environ_set(global_environ, "EVENT_NOEPOLL", 0, "%d", 1);
+#endif
 
 	/* Pass control to the client. */
 	exit(client_main(osdep_event_init(), argc, argv, flags, feat));
