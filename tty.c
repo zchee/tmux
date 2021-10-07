@@ -2051,7 +2051,7 @@ tty_cmd_rawsixel(struct tty *tty, const struct tty_ctx *ctx)
 	}
 }
 
-static void
+void
 tty_cmd_syncstart(struct tty *tty, const struct tty_ctx *ctx)
 {
 	if (ctx->num == 0x11) {
