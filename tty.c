@@ -2041,8 +2041,7 @@ tty_cmd_rawstring(struct tty *tty, const struct tty_ctx *ctx)
 void
 tty_cmd_rawsixel(struct tty *tty, const struct tty_ctx *ctx)
 {
-	if ((tty->term->flags & TERM_SIXEL) ||
-	    tty_term_has(tty->term, TTYC_SXL)) {
+	if (tty_term_has(tty->term, TTYC_SXL)) {
 		tty_add(tty, ctx->ptr, ctx->num);
 		tty->flags |= TTY_NOBLOCK;
 
