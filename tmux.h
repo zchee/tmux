@@ -1385,7 +1385,6 @@ struct tty {
 #define TTY_HAVEDA 0x100
 #define TTY_HAVEXDA 0x200
 #define TTY_SYNCING 0x400
-#define TTY_NOBLOCK 0x800
 	int		 flags;
 
 	struct tty_term	*term;
@@ -2867,8 +2866,8 @@ void	 screen_write_cell(struct screen_write_ctx *, const struct grid_cell *);
 void	 screen_write_setselection(struct screen_write_ctx *, u_char *, u_int);
 void	 screen_write_rawstring(struct screen_write_ctx *, u_char *, u_int);
 void	 screen_write_rawsixel(struct screen_write_ctx *, u_char *, u_int, int);
-void	 screen_write_alternateon(struct screen_write_ctx *, struct grid_cell *,
-	     int);
+void	 screen_write_alternateon(struct screen_write_ctx *,
+	     struct grid_cell *, int);
 void	 screen_write_alternateoff(struct screen_write_ctx *,
 	     struct grid_cell *, int);
 

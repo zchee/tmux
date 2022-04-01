@@ -690,7 +690,6 @@ tty_force_cursor_colour(struct tty *tty, int c)
 static int
 tty_update_cursor(struct tty *tty, int mode, struct screen *s)
 {
->>>>>>> master
 	enum screen_cursor_style	cstyle;
 	int				ccolour, changed, cmode = mode;
 
@@ -2119,8 +2118,8 @@ void
 tty_cmd_rawsixel(struct tty *tty, const struct tty_ctx *ctx)
 {
 	if (tty_term_has(tty->term, TTYC_SXL)) {
-		tty_add(tty, ctx->ptr, ctx->num);
 		tty->flags |= TTY_NOBLOCK;
+		tty_add(tty, ctx->ptr, ctx->num);
 
 		if (!ctx->more)
 			tty_invalidate(tty);
