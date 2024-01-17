@@ -107,6 +107,7 @@ struct ibuf *imsg_create(struct imsgbuf *, uint32_t, uint32_t, pid_t, uint16_t);
 int	 imsg_add(struct ibuf *, const void *, uint16_t);
 void	 imsg_close(struct imsgbuf *, struct ibuf *);
 void	 imsg_free(struct imsg *);
+int	 imsg_get_fd(struct imsgbuf *ibuf);
 int	 imsg_flush(struct imsgbuf *);
 void	 imsg_clear(struct imsgbuf *);
 

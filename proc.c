@@ -32,6 +32,7 @@
 #endif
 
 #include "tmux.h"
+#include "compat/imsg.h"
 
 struct tmuxproc {
 	const char	 *name;

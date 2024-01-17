@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#include "compat/imsg.h"
 
 static void	server_client_free(int, short, void *);
 static void	server_client_check_pane_resize(struct window_pane *);

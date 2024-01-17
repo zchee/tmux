@@ -30,7 +30,7 @@
 
 int	 imsg_fd_overhead = 0;
 
-static int	 imsg_get_fd(struct imsgbuf *);
+int	 imsg_get_fd(struct imsgbuf *);
 
 void
 imsg_init(struct imsgbuf *ibuf, int fd)
@@ -266,7 +266,7 @@ imsg_free(struct imsg *imsg)
 	freezero(imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE);
 }
 
-static int
+int
 imsg_get_fd(struct imsgbuf *ibuf)
 {
 	int		 fd;
