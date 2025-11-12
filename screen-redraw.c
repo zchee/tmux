@@ -36,6 +36,18 @@ static void	screen_redraw_draw_scrollbar(struct screen_redraw_ctx *,
 static void	screen_redraw_draw_pane_scrollbar(struct screen_redraw_ctx *,
 		    struct window_pane *);
 
+struct screen_redraw_pane_geom {
+	u_int	src_x;
+	u_int	dest_x;
+	u_int	width;
+	u_int	start_row;
+	u_int	end_row;
+	u_int	dest_y;
+};
+
+static int	screen_redraw_get_pane_geom(struct screen_redraw_ctx *,
+		    struct window_pane *, struct screen_redraw_pane_geom *);
+
 #define START_ISOLATE "\342\201\246"
 #define END_ISOLATE   "\342\201\251"
 
@@ -863,6 +875,45 @@ screen_redraw_draw_panes(struct screen_redraw_ctx *ctx)
 	}
 }
 
+static int
+screen_redraw_get_pane_geom(struct screen_redraw_ctx *ctx,
+    struct window_pane *wp, struct screen_redraw_pane_geom *geom)
+{
+	int	view_left = ctx->ox;
+	int	view_top = ctx->oy;
+	int	view_right = view_left + ctx->sx;
+	int	view_bottom = view_top + ctx->sy;
+	int	pane_left = wp->xoff;
+	int	pane_top = wp->yoff;
+	int	pane_right = pane_left + wp->sx;
+	int	pane_bottom = pane_top + wp->sy;
+	int	visible_left, visible_top, visible_right, visible_bottom;
+	u_int	top_offset;
+
+	if (pane_right <= view_left || pane_left >= view_right)
+		return (0);
+	if (pane_bottom <= view_top || pane_top >= view_bottom)
+		return (0);
+
+	visible_left = (pane_left > view_left) ? pane_left : view_left;
+	visible_right = (pane_right < view_right) ? pane_right : view_right;
+	visible_top = (pane_top > view_top) ? pane_top : view_top;
+	visible_bottom = (pane_bottom < view_bottom) ? pane_bottom : view_bottom;
+	if (visible_left >= visible_right || visible_top >= visible_bottom)
+		return (0);
+
+	geom->src_x = (u_int)(visible_left - pane_left);
+	geom->dest_x = (u_int)(visible_left - view_left);
+	geom->width = (u_int)(visible_right - visible_left);
+	geom->start_row = (u_int)(visible_top - pane_top);
+	geom->end_row = (u_int)(visible_bottom - pane_top);
+
+	top_offset = ctx->statustop ? ctx->statuslines : 0;
+	geom->dest_y = top_offset + (u_int)(visible_top - view_top);
+
+	return (1);
+}
+
 /* Draw the status line. */
 static void
 screen_redraw_draw_status(struct screen_redraw_ctx *ctx)
@@ -895,50 +946,20 @@ screen_redraw_draw_pane(struct screen_redraw_ctx *ctx, struct window_pane *wp)
 	struct screen		*s = wp->screen;
 	struct colour_palette	*palette = &wp->palette;
 	struct grid_cell	 defaults;
-	u_int			 i, j, top, x, y, width;
+	struct screen_redraw_pane_geom geom;
+	u_int			 row, dest_y;
 
 	log_debug("%s: %s @%u %%%u", __func__, c->name, w->id, wp->id);
 
-	if (wp->xoff + wp->sx <= ctx->ox || wp->xoff >= ctx->ox + ctx->sx)
+	if (!screen_redraw_get_pane_geom(ctx, wp, &geom))
 		return;
-	if (ctx->statustop)
-		top = ctx->statuslines;
-	else
-		top = 0;
-	for (j = 0; j < wp->sy; j++) {
-		if (wp->yoff + j < ctx->oy || wp->yoff + j >= ctx->oy + ctx->sy)
-			continue;
-		y = top + wp->yoff + j - ctx->oy;
 
-		if (wp->xoff >= ctx->ox &&
-		    wp->xoff + wp->sx <= ctx->ox + ctx->sx) {
-			/* All visible. */
-			i = 0;
-			x = wp->xoff - ctx->ox;
-			width = wp->sx;
-		} else if (wp->xoff < ctx->ox &&
-		    wp->xoff + wp->sx > ctx->ox + ctx->sx) {
-			/* Both left and right not visible. */
-			i = ctx->ox;
-			x = 0;
-			width = ctx->sx;
-		} else if (wp->xoff < ctx->ox) {
-			/* Left not visible. */
-			i = ctx->ox - wp->xoff;
-			x = 0;
-			width = wp->sx - i;
-		} else {
-			/* Right not visible. */
-			i = 0;
-			x = wp->xoff - ctx->ox;
-			width = ctx->sx - x;
-		}
-		log_debug("%s: %s %%%u line %u,%u at %u,%u, width %u",
-		    __func__, c->name, wp->id, i, j, x, y, width);
+	tty_default_colours(&defaults, wp);
 
-		tty_default_colours(&defaults, wp);
-		tty_draw_line(tty, s, i, j, width, x, y, &defaults, palette);
-	}
+	dest_y = geom.dest_y;
+	for (row = geom.start_row; row < geom.end_row; row++, dest_y++)
+		tty_draw_line(tty, s, geom.src_x, row, geom.width,
+		    geom.dest_x, dest_y, &defaults, palette);
 
 #ifdef ENABLE_SIXEL
 	tty_draw_images(c, wp, s);
