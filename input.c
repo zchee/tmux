@@ -168,6 +168,11 @@ static void	input_osc_111(struct input_ctx *, const char *);
 static void	input_osc_112(struct input_ctx *, const char *);
 static void	input_osc_133(struct input_ctx *, const char *);
 
+static struct input_transition_cache *
+		input_transition_cache_get(const struct input_state *);
+static const struct input_transition *
+		input_transition_lookup(const struct input_state *, u_char);
+
 /* Transition entry/exit handlers. */
 static void	input_clear(struct input_ctx *);
 static void	input_ground(struct input_ctx *);
@@ -354,6 +359,14 @@ struct input_state {
 	void				(*exit)(struct input_ctx *);
 	const struct input_transition	*transitions;
 };
+
+struct input_transition_cache {
+	const struct input_state		*state;
+	const struct input_transition		*table[UCHAR_MAX + 1];
+	struct input_transition_cache		*next;
+};
+
+static struct input_transition_cache	*input_transition_caches;
 
 /* State transitions available from all states. */
 #define INPUT_STATE_ANYWHERE \
@@ -949,6 +962,62 @@ input_set_state(struct input_ctx *ictx, const struct input_transition *itr)
 		ictx->state->enter(ictx);
 }
 
+static struct input_transition_cache *
+input_transition_cache_get(const struct input_state *state)
+{
+	struct input_transition_cache	*cache;
+	const struct input_transition	*itr;
+	int				 first, last, value;
+
+	/* Reuse existing cache if we have already expanded this state. */
+	for (cache = input_transition_caches; cache != NULL; cache = cache->next) {
+		if (cache->state == state)
+			return (cache);
+	}
+
+	cache = xcalloc(1, sizeof *cache);
+	cache->state = state;
+
+	for (itr = state->transitions; itr->first != -1 && itr->last != -1; itr++) {
+		first = itr->first;
+		last = itr->last;
+
+		if (last < 0)
+			continue;
+		if (first < 0)
+			first = 0;
+		if (last > UCHAR_MAX)
+			last = UCHAR_MAX;
+
+		for (value = first; value <= last; value++) {
+			if (cache->table[value] == NULL)
+				cache->table[value] = itr;
+		}
+	}
+
+	cache->next = input_transition_caches;
+	input_transition_caches = cache;
+	return (cache);
+}
+
+static const struct input_transition *
+input_transition_lookup(const struct input_state *state, u_char ch)
+{
+	struct input_transition_cache	*cache;
+	const struct input_transition	*itr;
+
+	/* Look up the transition from the per-state cache, falling back if needed. */
+	cache = input_transition_cache_get(state);
+	if (cache->table[ch] != NULL)
+		return (cache->table[ch]);
+
+	for (itr = state->transitions; itr->first != -1 && itr->last != -1; itr++) {
+		if (ch >= itr->first && ch <= itr->last)
+			return (itr);
+	}
+	return (NULL);
+}
+
 /* Parse data. */
 static void
 input_parse(struct input_ctx *ictx, u_char *buf, size_t len)
@@ -967,17 +1036,9 @@ input_parse(struct input_ctx *ictx, u_char *buf, size_t len)
 		    itr == NULL ||
 		    ictx->ch < itr->first ||
 		    ictx->ch > itr->last) {
-			itr = ictx->state->transitions;
-			while (itr->first != -1 && itr->last != -1) {
-				if (ictx->ch >= itr->first &&
-				    ictx->ch <= itr->last)
-					break;
-				itr++;
-			}
-			if (itr->first == -1 || itr->last == -1) {
-				/* No transition? Eh? */
+			itr = input_transition_lookup(ictx->state, ictx->ch);
+			if (itr == NULL)
 				fatalx("no transition from state");
-			}
 		}
 		state = ictx->state;
 
