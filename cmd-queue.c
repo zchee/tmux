@@ -89,6 +89,7 @@ struct cmdq_state {
 struct cmdq_list {
 	struct cmdq_item	*item;
 	struct cmdq_item_list	 list;
+	int			 ready;
 };
 
 /* Get command queue name. */
@@ -128,7 +129,35 @@ cmdq_new(void)
 
 	queue = xcalloc(1, sizeof *queue);
 	TAILQ_INIT (&queue->list);
+	queue->ready = 0;
 	return (queue);
+}
+
+static u_int	cmdq_ready_queues;
+
+static void
+cmdq_update_ready(struct cmdq_list *queue)
+{
+	struct cmdq_item	*first;
+	int			 ready;
+
+	first = TAILQ_FIRST(&queue->list);
+	ready = (first != NULL && (~first->flags & CMDQ_WAITING));
+	if (ready && !queue->ready) {
+		queue->ready = 1;
+		cmdq_ready_queues++;
+	} else if (!ready && queue->ready) {
+		queue->ready = 0;
+		if (cmdq_ready_queues == 0)
+			fatalx("cmdq_ready_queues underflow");
+		cmdq_ready_queues--;
+	}
+}
+
+int
+cmdq_ready(void)
+{
+	return (cmdq_ready_queues != 0);
 }
 
 /* Free a queue. */
@@ -317,6 +346,7 @@ cmdq_append(struct client *c, struct cmdq_item *item)
 
 		item = next;
 	} while (item != NULL);
+	cmdq_update_ready(queue);
 	return (TAILQ_LAST(&queue->list, cmdq_item_list));
 }
 
@@ -345,6 +375,7 @@ cmdq_insert_after(struct cmdq_item *after, struct cmdq_item *item)
 		after = item;
 		item = next;
 	} while (item != NULL);
+	cmdq_update_ready(queue);
 	return (after);
 }
 
@@ -447,6 +478,7 @@ void
 cmdq_continue(struct cmdq_item *item)
 {
 	item->flags &= ~CMDQ_WAITING;
+	cmdq_update_ready(item->queue);
 }
 
 /* Remove an item. */
@@ -460,6 +492,7 @@ cmdq_remove(struct cmdq_item *item)
 	cmdq_free_state(item->state);
 
 	TAILQ_REMOVE(&item->queue->list, item, entry);
+	cmdq_update_ready(item->queue);
 
 	free(item->name);
 	free(item);
@@ -791,6 +824,7 @@ cmdq_next(struct client *c)
 
 			if (retval == CMD_RETURN_WAIT) {
 				item->flags |= CMDQ_WAITING;
+				cmdq_update_ready(queue);
 				goto waiting;
 			}
 			items++;

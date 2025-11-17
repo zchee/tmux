@@ -268,13 +268,15 @@ server_loop(void)
 
 	current_time = time(NULL);
 
-	do {
-		items = cmdq_next(NULL);
-		TAILQ_FOREACH(c, &clients, entry) {
-			if (c->flags & CLIENT_IDENTIFIED)
-				items += cmdq_next(c);
-		}
-	} while (items != 0);
+	if (cmdq_ready()) {
+		do {
+			items = cmdq_next(NULL);
+			TAILQ_FOREACH(c, &clients, entry) {
+				if (c->flags & CLIENT_IDENTIFIED)
+					items += cmdq_next(c);
+			}
+		} while (items != 0 && cmdq_ready());
+	}
 
 	server_client_loop();
 

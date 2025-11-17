@@ -3678,3 +3678,4 @@ void			 hyperlinks_reset(struct hyperlinks *);
 void			 hyperlinks_free(struct hyperlinks *);
 
 #endif /* TMUX_H */
+int	 cmdq_ready(void);
