@@ -1037,13 +1037,13 @@ input_parse(struct input_ctx *ictx, u_char *buf, size_t len)
 		state = ictx->state;
 
 		/*
-		 * Any state except print stops the current collection. This is
-		 * an optimization to avoid checking if the attributes have
-		 * changed for every character. It will stop unnecessarily for
-		 * sequences that don't make a terminal change, but they should
-		 * be the minority.
+		 * Only stop the collection when we're in the ground state and
+		 * about to run something other than plain printing. Once we
+		 * leave ground we can keep batching until we return, which
+		 * avoids flushing for every CSI/OSC parameter byte.
 		 */
-		if (itr->handler != input_print)
+		if (ictx->state == &input_state_ground &&
+		    itr->handler != input_print)
 			screen_write_collect_end(sctx);
 
 		/*
