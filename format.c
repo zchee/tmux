@@ -27,6 +27,7 @@
 #include <pwd.h>
 #include <regex.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -53,10 +54,16 @@ static void	 format_defaults_winlink(struct format_tree *,
 
 /* Entry in format job tree. */
 struct format_job {
-	struct client		*client;
-	u_int			 tag;
+	struct client		*client;	/* owner for notifications */
 	const char		*cmd;
 	const char		*expanded;
+
+	struct client		*c;
+	struct session		*s;
+	struct winlink		*wl;
+	struct window		*w;
+	struct window_pane	*wp;
+	struct paste_buffer	*pb;
 
 	time_t			 last;
 	char			*out;
@@ -70,19 +77,50 @@ struct format_job {
 
 /* Format job tree. */
 static int format_job_cmp(struct format_job *, struct format_job *);
+static void format_job_set_context(struct format_job *, struct format_tree *);
 static RB_HEAD(format_job_tree, format_job) format_jobs = RB_INITIALIZER();
 RB_GENERATE_STATIC(format_job_tree, format_job, entry, format_job_cmp);
 
 /* Format job tree comparison function. */
+static inline int
+format_ptr_cmp(const void *a, const void *b)
+{
+	uintptr_t	ua = (uintptr_t)a;
+	uintptr_t	ub = (uintptr_t)b;
+
+	if (ua < ub)
+		return (-1);
+	if (ua > ub)
+		return (1);
+	return (0);
+}
+
 static int
 format_job_cmp(struct format_job *fj1, struct format_job *fj2)
 {
-	if (fj1->tag < fj2->tag)
-		return (-1);
-	if (fj1->tag > fj2->tag)
-		return (1);
-	return (strcmp(fj1->cmd, fj2->cmd));
+	int	r;
+
+	r = strcmp(fj1->cmd, fj2->cmd);
+	if (r != 0)
+		return (r);
+	r = format_ptr_cmp(fj1->c, fj2->c);
+	if (r != 0)
+		return (r);
+	r = format_ptr_cmp(fj1->s, fj2->s);
+	if (r != 0)
+		return (r);
+	r = format_ptr_cmp(fj1->wl, fj2->wl);
+	if (r != 0)
+		return (r);
+	r = format_ptr_cmp(fj1->w, fj2->w);
+	if (r != 0)
+		return (r);
+	r = format_ptr_cmp(fj1->wp, fj2->wp);
+	if (r != 0)
+		return (r);
+	return (format_ptr_cmp(fj1->pb, fj2->pb));
 }
+
 
 /* Format modifiers. */
 #define FORMAT_TIMESTRING 0x1
@@ -165,6 +203,17 @@ struct format_tree {
 };
 static int format_entry_cmp(struct format_entry *, struct format_entry *);
 RB_GENERATE_STATIC(format_entry_tree, format_entry, entry, format_entry_cmp);
+
+static void
+format_job_set_context(struct format_job *fj, struct format_tree *ft)
+{
+	fj->c = ft->c;
+	fj->s = ft->s;
+	fj->wl = ft->wl;
+	fj->w = ft->w;
+	fj->wp = ft->wp;
+	fj->pb = ft->pb;
+}
 
 /* Format expand state. */
 struct format_expand_state {
@@ -382,13 +431,14 @@ format_job_get(struct format_expand_state *es, const char *cmd)
 		RB_INIT(jobs);
 	}
 
-	fj0.tag = ft->tag;
+	memset(&fj0, 0, sizeof fj0);
 	fj0.cmd = cmd;
+	format_job_set_context(&fj0, ft);
 	if ((fj = RB_FIND(format_job_tree, jobs, &fj0)) == NULL) {
 		fj = xcalloc(1, sizeof *fj);
 		fj->client = ft->client;
-		fj->tag = ft->tag;
 		fj->cmd = xstrdup(cmd);
+		format_job_set_context(fj, ft);
 
 		RB_INSERT(format_job_tree, jobs, fj);
 	}
