@@ -49,7 +49,11 @@ struct cmdq_state;
 struct cmds;
 struct control_state;
 struct environ;
+struct format_job;
 struct format_job_tree;
+struct format_job_subscription;
+TAILQ_HEAD(format_job_subscribers, format_job_subscription);
+TAILQ_HEAD(format_job_client_subs, format_job_subscription);
 struct format_tree;
 struct hyperlinks_uri;
 struct hyperlinks;
@@ -1944,7 +1948,7 @@ struct client {
 	struct timeval	 	 last_activity_time;
 
 	struct environ		*environ;
-	struct format_job_tree	*jobs;
+	struct format_job_client_subs	 job_subs;
 
 	char			*title;
 	char			*path;

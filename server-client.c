@@ -301,6 +301,7 @@ server_client_create(int fd)
 	c->tty.sx = 80;
 	c->tty.sy = 24;
 	c->theme = THEME_UNKNOWN;
+	TAILQ_INIT(&c->job_subs);
 
 	status_init(c);
 	c->flags |= CLIENT_FOCUSED;

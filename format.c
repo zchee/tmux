@@ -53,17 +53,17 @@ static void	 format_defaults_winlink(struct format_tree *,
 		     struct winlink *);
 
 /* Entry in format job tree. */
-struct format_job {
-	struct client		*client;	/* owner for notifications */
-	const char		*cmd;
-	const char		*expanded;
+struct format_job_subscription {
+	struct client				*client;
+	struct format_job			*job;
+	TAILQ_ENTRY(format_job_subscription)	 job_entry;
+	TAILQ_ENTRY(format_job_subscription)	 client_entry;
+};
 
-	struct client		*c;
-	struct session		*s;
-	struct winlink		*wl;
-	struct window		*w;
-	struct window_pane	*wp;
-	struct paste_buffer	*pb;
+struct format_job {
+	char			*cmd;
+	char			*cwd;
+	struct format_job_subscribers subscribers;
 
 	time_t			 last;
 	char			*out;
@@ -77,24 +77,15 @@ struct format_job {
 
 /* Format job tree. */
 static int format_job_cmp(struct format_job *, struct format_job *);
-static void format_job_set_context(struct format_job *, struct format_tree *);
 static RB_HEAD(format_job_tree, format_job) format_jobs = RB_INITIALIZER();
 RB_GENERATE_STATIC(format_job_tree, format_job, entry, format_job_cmp);
 
+static void format_job_notify(struct format_job *);
+static void format_job_add_subscriber(struct format_job *, struct client *);
+static void format_job_remove_subscription(struct format_job_subscription *);
+static void format_job_remove_client(struct client *);
+
 /* Format job tree comparison function. */
-static inline int
-format_ptr_cmp(const void *a, const void *b)
-{
-	uintptr_t	ua = (uintptr_t)a;
-	uintptr_t	ub = (uintptr_t)b;
-
-	if (ua < ub)
-		return (-1);
-	if (ua > ub)
-		return (1);
-	return (0);
-}
-
 static int
 format_job_cmp(struct format_job *fj1, struct format_job *fj2)
 {
@@ -103,22 +94,60 @@ format_job_cmp(struct format_job *fj1, struct format_job *fj2)
 	r = strcmp(fj1->cmd, fj2->cmd);
 	if (r != 0)
 		return (r);
-	r = format_ptr_cmp(fj1->c, fj2->c);
-	if (r != 0)
-		return (r);
-	r = format_ptr_cmp(fj1->s, fj2->s);
-	if (r != 0)
-		return (r);
-	r = format_ptr_cmp(fj1->wl, fj2->wl);
-	if (r != 0)
-		return (r);
-	r = format_ptr_cmp(fj1->w, fj2->w);
-	if (r != 0)
-		return (r);
-	r = format_ptr_cmp(fj1->wp, fj2->wp);
-	if (r != 0)
-		return (r);
-	return (format_ptr_cmp(fj1->pb, fj2->pb));
+	return (strcmp(fj1->cwd, fj2->cwd));
+}
+
+static void
+format_job_remove_subscription(struct format_job_subscription *sub)
+{
+	if (sub == NULL)
+		return;
+	TAILQ_REMOVE(&sub->job->subscribers, sub, job_entry);
+	TAILQ_REMOVE(&sub->client->job_subs, sub, client_entry);
+	free(sub);
+}
+
+static void
+format_job_add_subscriber(struct format_job *fj, struct client *c)
+{
+	struct format_job_subscription	*sub;
+
+	if (c == NULL)
+		return;
+	TAILQ_FOREACH(sub, &fj->subscribers, job_entry) {
+		if (sub->client == c)
+			return;
+	}
+	sub = xcalloc(1, sizeof *sub);
+	sub->client = c;
+	sub->job = fj;
+	TAILQ_INSERT_TAIL(&fj->subscribers, sub, job_entry);
+	TAILQ_INSERT_TAIL(&c->job_subs, sub, client_entry);
+}
+
+static void
+format_job_remove_client(struct client *c)
+{
+	struct format_job_subscription	*sub, *tmp;
+
+	if (c == NULL)
+		return;
+	TAILQ_FOREACH_SAFE(sub, &c->job_subs, client_entry, tmp)
+		format_job_remove_subscription(sub);
+}
+
+static void
+format_job_notify(struct format_job *fj)
+{
+	struct format_job_subscription	*sub, *tmp;
+
+	TAILQ_FOREACH_SAFE(sub, &fj->subscribers, job_entry, tmp) {
+		if (sub->client->flags & CLIENT_DEAD) {
+			format_job_remove_subscription(sub);
+			continue;
+		}
+		server_status_client(sub->client);
+	}
 }
 
 
@@ -203,17 +232,6 @@ struct format_tree {
 };
 static int format_entry_cmp(struct format_entry *, struct format_entry *);
 RB_GENERATE_STATIC(format_entry_tree, format_entry, entry, format_entry_cmp);
-
-static void
-format_job_set_context(struct format_job *fj, struct format_tree *ft)
-{
-	fj->c = ft->c;
-	fj->s = ft->s;
-	fj->wl = ft->wl;
-	fj->w = ft->w;
-	fj->wp = ft->wp;
-	fj->pb = ft->pb;
-}
 
 /* Format expand state. */
 struct format_expand_state {
@@ -368,8 +386,7 @@ format_job_update(struct job *job)
 
 	t = time(NULL);
 	if (fj->status && fj->last != t) {
-		if (fj->client != NULL)
-			server_status_client(fj->client);
+		format_job_notify(fj);
 		fj->last = t;
 	}
 }
@@ -404,8 +421,7 @@ format_job_complete(struct job *job)
 		free(buf);
 
 	if (fj->status) {
-		if (fj->client != NULL)
-			server_status_client(fj->client);
+		format_job_notify(fj);
 		fj->status = 0;
 	}
 }
@@ -415,52 +431,49 @@ static char *
 format_job_get(struct format_expand_state *es, const char *cmd)
 {
 	struct format_tree		*ft = es->ft;
-	struct format_job_tree		*jobs;
 	struct format_job		 fj0, *fj;
 	time_t				 t;
-	char				*expanded;
+	char				*expanded, *cwd_copy;
+	const char			*cwd;
 	int				 force;
 	struct format_expand_state	 next;
 
-	if (ft->client == NULL)
-		jobs = &format_jobs;
-	else if (ft->client->jobs != NULL)
-		jobs = ft->client->jobs;
-	else {
-		jobs = ft->client->jobs = xmalloc(sizeof *ft->client->jobs);
-		RB_INIT(jobs);
-	}
-
-	memset(&fj0, 0, sizeof fj0);
-	fj0.cmd = cmd;
-	format_job_set_context(&fj0, ft);
-	if ((fj = RB_FIND(format_job_tree, jobs, &fj0)) == NULL) {
-		fj = xcalloc(1, sizeof *fj);
-		fj->client = ft->client;
-		fj->cmd = xstrdup(cmd);
-		format_job_set_context(fj, ft);
-
-		RB_INSERT(format_job_tree, jobs, fj);
-	}
-
 	format_copy_state(&next, es, FORMAT_EXPAND_NOJOBS);
 	next.flags &= ~FORMAT_EXPAND_TIME;
-
 	expanded = format_expand1(&next, cmd);
-	if (fj->expanded == NULL || strcmp(expanded, fj->expanded) != 0) {
-		free((void *)fj->expanded);
-		fj->expanded = xstrdup(expanded);
-		force = 1;
-	} else
-		force = (ft->flags & FORMAT_FORCE);
+
+	cwd = server_client_get_cwd(ft->client, NULL);
+	if (cwd == NULL)
+		cwd = "";
+	cwd_copy = xstrdup(cwd);
+
+	memset(&fj0, 0, sizeof fj0);
+	fj0.cmd = expanded;
+	fj0.cwd = cwd_copy;
+	if ((fj = RB_FIND(format_job_tree, &format_jobs, &fj0)) == NULL) {
+		fj = xcalloc(1, sizeof *fj);
+		fj->cmd = expanded;
+		fj->cwd = cwd_copy;
+		TAILQ_INIT(&fj->subscribers);
+
+		RB_INSERT(format_job_tree, &format_jobs, fj);
+		expanded = NULL;
+		cwd_copy = NULL;
+	} else {
+		free(cwd_copy);
+	}
+
+	format_job_add_subscriber(fj, ft->client);
+
+	force = (ft->flags & FORMAT_FORCE);
 
 	t = time(NULL);
 	if (force && fj->job != NULL)
 	       job_free(fj->job);
 	if (force || (fj->job == NULL && fj->last != t)) {
-		fj->job = job_run(expanded, 0, NULL, NULL, NULL,
-		    server_client_get_cwd(ft->client, NULL), format_job_update,
-		    format_job_complete, NULL, fj, JOB_NOWAIT, -1, -1);
+		fj->job = job_run(fj->cmd, 0, NULL, NULL, NULL, fj->cwd,
+		    format_job_update, format_job_complete, NULL, fj,
+		    JOB_NOWAIT, -1, -1);
 		if (fj->job == NULL) {
 			free(fj->out);
 			xasprintf(&fj->out, "<'%s' didn't start>", fj->cmd);
@@ -483,6 +496,7 @@ static void
 format_job_tidy(struct format_job_tree *jobs, int force)
 {
 	struct format_job	*fj, *fj1;
+	struct format_job_subscription *sub;
 	time_t			 now;
 
 	now = time(NULL);
@@ -496,8 +510,11 @@ format_job_tidy(struct format_job_tree *jobs, int force)
 		if (fj->job != NULL)
 			job_free(fj->job);
 
-		free((void *)fj->expanded);
-		free((void *)fj->cmd);
+		while ((sub = TAILQ_FIRST(&fj->subscribers)) != NULL)
+			format_job_remove_subscription(sub);
+
+		free(fj->cwd);
+		free(fj->cmd);
 		free(fj->out);
 
 		free(fj);
@@ -508,22 +525,14 @@ format_job_tidy(struct format_job_tree *jobs, int force)
 void
 format_tidy_jobs(void)
 {
-	struct client	*c;
-
 	format_job_tidy(&format_jobs, 0);
-	TAILQ_FOREACH(c, &clients, entry) {
-		if (c->jobs != NULL)
-			format_job_tidy(c->jobs, 0);
-	}
 }
 
 /* Remove old jobs for client. */
 void
 format_lost_client(struct client *c)
 {
-	if (c->jobs != NULL)
-		format_job_tidy(c->jobs, 1);
-	free(c->jobs);
+	format_job_remove_client(c);
 }
 
 /* Wrapper for asprintf. */
