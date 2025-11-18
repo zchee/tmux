@@ -17,6 +17,7 @@
 
 ### Findings Log
 - Added a per-queue readiness tracker so `server_loop` only drains when at least one queue head is runnable, eliminating the previous do/while busy scan at idle.
+- Rebuilt `tmux` plus the `regress` suite with the readiness changes and fixed the misplaced `cmdq_ready` prototype so it remains inside the header guard.
 
 ### Measurement / Validation Ideas
 - Temporarily log `cmdq_ready_queues` transitions and sample `perf top` while tmux is idle to confirm CPU drops to zero.

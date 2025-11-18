@@ -2792,6 +2792,7 @@ void printflike(4, 5) cmdq_insert_hook(struct session *, struct cmdq_item *,
 void		 cmdq_continue(struct cmdq_item *);
 u_int		 cmdq_next(struct client *);
 struct cmdq_item *cmdq_running(struct client *);
+int		 cmdq_ready(void);
 void		 cmdq_guard(struct cmdq_item *, const char *, int);
 void printflike(2, 3) cmdq_print(struct cmdq_item *, const char *, ...);
 void 		 cmdq_print_data(struct cmdq_item *, struct evbuffer *);
@@ -3678,4 +3679,3 @@ void			 hyperlinks_reset(struct hyperlinks *);
 void			 hyperlinks_free(struct hyperlinks *);
 
 #endif /* TMUX_H */
-int	 cmdq_ready(void);
