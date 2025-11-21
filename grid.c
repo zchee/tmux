@@ -1432,9 +1432,40 @@ grid_reflow(struct grid *gd, u_int sx)
 	struct grid_line	*gl;
 	struct grid_cell	 gc;
 	u_int			 yy, width, i, at;
+	int			 needs_reflow = 0;
 
 	if (gd->sx == sx)
 		return;
+
+	for (yy = 0; yy < gd->hsize + gd->sy; yy++) {
+		gl = &gd->linedata[yy];
+		if (gl->flags & GRID_LINE_DEAD)
+			continue;
+
+		if (~gl->flags & GRID_LINE_EXTENDED) {
+			width = gl->cellused;
+		} else {
+			width = 0;
+			for (i = 0; i < gl->cellused; i++) {
+				grid_get_cell1(gl, i, &gc);
+				width += gc.data.width;
+				if (width > sx)
+					break;
+			}
+		}
+
+		if (width == sx)
+			continue;
+		if (width > sx || (gl->flags & GRID_LINE_WRAPPED)) {
+			needs_reflow = 1;
+			break;
+		}
+	}
+
+	if (!needs_reflow) {
+		gd->sx = sx;
+		return;
+	}
 
 	/*
 	 * Create a destination grid. This is just used as a container for the
