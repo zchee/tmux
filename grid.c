@@ -220,6 +220,13 @@ grid_adjust_lines(struct grid *gd, u_int lines)
 	grid_ensure_lines(gd, lines);
 }
 
+/* Invalidate cached width for a line. */
+static void
+grid_invalidate_line(struct grid_line *gl)
+{
+	gl->flags &= ~GRID_LINE_WIDTHVALID;
+}
+
 /* Copy default into a cell. */
 static void
 grid_clear_cell(struct grid *gd, u_int px, u_int py, u_int bg)
@@ -227,6 +234,8 @@ grid_clear_cell(struct grid *gd, u_int px, u_int py, u_int bg)
 	struct grid_line	*gl = &gd->linedata[py];
 	struct grid_cell_entry	*gce = &gl->celldata[px];
 	struct grid_extd_entry	*gee;
+
+	grid_invalidate_line(gl);
 
 	memcpy(gce, &grid_cleared_entry, sizeof *gce);
 	if (bg != 8) {
@@ -606,6 +615,8 @@ grid_set_cell(struct grid *gd, u_int px, u_int py, const struct grid_cell *gc)
 	if (px + 1 > gl->cellused)
 		gl->cellused = px + 1;
 
+	grid_invalidate_line(gl);
+
 	gce = &gl->celldata[px];
 	if (grid_need_extended_cell(gce, gc))
 		grid_extended_cell(gl, gce, gc);
@@ -638,6 +649,8 @@ grid_set_cells(struct grid *gd, u_int px, u_int py, const struct grid_cell *gc,
 	gl = &gd->linedata[py];
 	if (px + slen > gl->cellused)
 		gl->cellused = px + slen;
+
+	grid_invalidate_line(gl);
 
 	for (i = 0; i < slen; i++) {
 		gce = &gl->celldata[px + i];
@@ -770,6 +783,9 @@ grid_move_cells(struct grid *gd, u_int dx, u_int px, u_int py, u_int nx,
 
 	grid_expand_line(gd, py, px + nx, 8);
 	grid_expand_line(gd, py, dx + nx, 8);
+
+	grid_invalidate_line(gl);
+
 	memmove(&gl->celldata[dx], &gl->celldata[px],
 	    nx * sizeof *gl->celldata);
 	if (dx + nx > gl->cellused)
@@ -1222,6 +1238,41 @@ grid_reflow_dead(struct grid_line *gl)
 	gl->flags = GRID_LINE_DEAD;
 }
 
+static void
+grid_reflow_measure(struct grid_line *gl, u_int sx, u_int *at, u_int *width)
+{
+	struct grid_cell	 gc;
+	u_int			 i, w = 0, overflow = gl->cellused;
+
+	if (~gl->flags & GRID_LINE_EXTENDED) {
+		w = gl->cellused;
+		if (w > sx)
+			overflow = sx;
+		gl->cached_width = w;
+		gl->flags |= GRID_LINE_WIDTHVALID;
+	} else if ((gl->flags & GRID_LINE_WIDTHVALID) &&
+	    gl->cached_width <= sx) {
+		w = gl->cached_width;
+		gl->flags |= GRID_LINE_WIDTHVALID;
+	} else {
+		overflow = gl->cellused;
+		for (i = 0; i < gl->cellused; i++) {
+			grid_get_cell1(gl, i, &gc);
+			if (overflow == gl->cellused &&
+			    w + gc.data.width > sx)
+				overflow = i;
+			w += gc.data.width;
+		}
+		gl->cached_width = w;
+		gl->flags |= GRID_LINE_WIDTHVALID;
+	}
+
+	if (overflow == gl->cellused)
+		overflow = w;
+	*width = w;
+	*at = overflow;
+}
+
 /* Add lines, return the first new one. */
 static struct grid_line *
 grid_reflow_add(struct grid *gd, u_int n)
@@ -1409,6 +1460,7 @@ grid_reflow_split(struct grid *target, struct grid *gd, u_int sx, u_int yy,
 	/* Move the remainder of the original line. */
 	gl->cellsize = gl->cellused = at;
 	gl->flags |= GRID_LINE_WRAPPED;
+	grid_invalidate_line(gl);
 	memcpy(first, gl, sizeof *first);
 	grid_reflow_dead(gl);
 
@@ -1430,33 +1482,23 @@ grid_reflow(struct grid *gd, u_int sx)
 {
 	struct grid		*target;
 	struct grid_line	*gl;
-	struct grid_cell	 gc;
-	u_int			 yy, width, i, at;
+	u_int			 yy, width, at, start = 0, total;
 	int			 needs_reflow = 0;
 
 	if (gd->sx == sx)
 		return;
 
-	for (yy = 0; yy < gd->hsize + gd->sy; yy++) {
+	total = gd->hsize + gd->sy;
+	for (yy = 0; yy < total; yy++) {
 		gl = &gd->linedata[yy];
 		if (gl->flags & GRID_LINE_DEAD)
 			continue;
 
-		if (~gl->flags & GRID_LINE_EXTENDED) {
-			width = gl->cellused;
-		} else {
-			width = 0;
-			for (i = 0; i < gl->cellused; i++) {
-				grid_get_cell1(gl, i, &gc);
-				width += gc.data.width;
-				if (width > sx)
-					break;
-			}
-		}
-
+		grid_reflow_measure(gl, sx, &at, &width);
 		if (width == sx)
 			continue;
 		if (width > sx || (gl->flags & GRID_LINE_WRAPPED)) {
+			start = yy;
 			needs_reflow = 1;
 			break;
 		}
@@ -1471,36 +1513,26 @@ grid_reflow(struct grid *gd, u_int sx)
 	 * Create a destination grid. This is just used as a container for the
 	 * line data and may not be fully valid.
 	 */
-	target = grid_create(gd->sx, 0, 0);
+	target = grid_create(sx, 0, 0);
+
+	/* Copy any leading lines that do not need reflow. */
+	for (yy = 0; yy < start; yy++) {
+		gl = &gd->linedata[yy];
+		if (gl->flags & GRID_LINE_DEAD)
+			continue;
+		grid_reflow_move(target, gl);
+	}
 
 	/*
 	 * Loop over each source line.
 	 */
-	for (yy = 0; yy < gd->hsize + gd->sy; yy++) {
+	for (yy = start; yy < total; yy++) {
 		gl = &gd->linedata[yy];
 		if (gl->flags & GRID_LINE_DEAD)
 			continue;
 
-		/*
-		 * Work out the width of this line. at is the point at which
-		 * the available width is hit, and width is the full line
-		 * width.
-		 */
-		at = width = 0;
-		if (~gl->flags & GRID_LINE_EXTENDED) {
-			width = gl->cellused;
-			if (width > sx)
-				at = sx;
-			else
-				at = width;
-		} else {
-			for (i = 0; i < gl->cellused; i++) {
-				grid_get_cell1(gl, i, &gc);
-				if (at == 0 && width + gc.data.width > sx)
-					at = i;
-				width += gc.data.width;
-			}
-		}
+		/* Work out the width of this line. */
+		grid_reflow_measure(gl, sx, &at, &width);
 
 		/*
 		 * If the line is exactly right, just move it across
@@ -1542,6 +1574,7 @@ grid_reflow(struct grid *gd, u_int sx)
 	gd->linedata = target->linedata;
 	gd->linedata_size = target->linedata_size;
 	free(target);
+	gd->sx = sx;
 }
 
 /* Convert to position based on wrapped lines. */
