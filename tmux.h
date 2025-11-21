@@ -847,6 +847,7 @@ struct grid {
 	u_int			 hlimit;
 
 	struct grid_line	*linedata;
+	u_int			 linedata_size;
 };
 
 /* Virtual cursor in a grid. */
@@ -1234,6 +1235,9 @@ struct window_pane {
 
 	struct screen	 status_screen;
 	size_t		 status_size;
+	char		*status_cached_expanded;
+	struct grid_cell status_cached_gc;
+	u_int		 status_cached_width;
 
 	TAILQ_HEAD(, window_mode_entry) modes;
 
@@ -1838,6 +1842,8 @@ struct cmd_entry {
 #define STATUS_LINES_LIMIT 5
 struct status_line_entry {
 	char			*expanded;
+	const char		*format;
+	time_t			 expanded_time;
 	struct style_ranges	 ranges;
 };
 struct status_line {
