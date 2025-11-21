@@ -1852,6 +1852,7 @@ struct status_line {
 	struct screen		 screen;
 	struct screen		*active;
 	int			 references;
+	int			 has_time;
 
 	struct grid_cell	 style;
 	struct status_line_entry entries[STATUS_LINES_LIMIT];
@@ -2357,6 +2358,7 @@ void		 format_each(struct format_tree *, void (*)(const char *,
 char		*format_pretty_time(time_t, int);
 char		*format_expand_time(struct format_tree *, const char *);
 char		*format_expand(struct format_tree *, const char *);
+int		 format_has_time(struct format_tree *);
 char		*format_single(struct cmdq_item *, const char *,
 		     struct client *, struct session *, struct winlink *,
 		     struct window_pane *);

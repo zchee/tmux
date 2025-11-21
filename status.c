@@ -181,6 +181,7 @@ status_timer_callback(__unused int fd, __unused short events, void *arg)
 {
 	struct client	*c = arg;
 	struct session	*s = c->session;
+	struct status_line *sl = &c->status;
 	struct timeval	 tv;
 
 	evtimer_del(&c->status.timer);
@@ -194,7 +195,7 @@ status_timer_callback(__unused int fd, __unused short events, void *arg)
 	timerclear(&tv);
 	tv.tv_sec = options_get_number(s->options, "status-interval");
 
-	if (tv.tv_sec != 0)
+	if (tv.tv_sec != 0 && sl->has_time)
 		evtimer_add(&c->status.timer, &tv);
 	log_debug("client %p, status interval %d", c, (int)tv.tv_sec);
 }
@@ -341,6 +342,8 @@ status_init(struct client *c)
 	for (i = 0; i < nitems(sl->entries); i++)
 		TAILQ_INIT(&sl->entries[i].ranges);
 
+	sl->has_time = 1;
+
 	screen_init(&sl->screen, c->tty.sx, 1, 0);
 	sl->active = &sl->screen;
 }
@@ -467,6 +470,7 @@ status_redraw(struct client *c)
 	screen_write_stop(&ctx);
 
 	/* Free the format tree. */
+	sl->has_time = format_has_time(ft);
 	format_free(ft);
 
 	/* Return if the status line has changed. */

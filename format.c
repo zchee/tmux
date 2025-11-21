@@ -240,6 +240,7 @@ struct format_tree {
 	struct client		*client;
 	int			 flags;
 	u_int			 tag;
+	int			 time_expanded;
 
 	struct mouse_event	 m;
 
@@ -4007,8 +4008,10 @@ format_find(struct format_tree *ft, const char *key, int modifiers,
 	fte = format_table_get(key);
 	if (fte != NULL) {
 		value = fte->cb(ft);
-		if (fte->type == FORMAT_TABLE_TIME && value != NULL)
+		if (fte->type == FORMAT_TABLE_TIME && value != NULL) {
 			t = ((struct timeval *)value)->tv_sec;
+			ft->time_expanded = 1;
+		}
 		else
 			found = value;
 		goto found;
@@ -4018,6 +4021,7 @@ format_find(struct format_tree *ft, const char *key, int modifiers,
 	if (fe != NULL) {
 		if (fe->time != 0) {
 			t = fe->time;
+			ft->time_expanded = 1;
 			goto found;
 		}
 		if (fe->value == NULL && fe->cb != NULL) {
@@ -4045,6 +4049,7 @@ format_find(struct format_tree *ft, const char *key, int modifiers,
 
 found:
 	if (modifiers & FORMAT_TIMESTRING) {
+		ft->time_expanded = 1;
 		if (t == 0 && found != NULL) {
 			t = strtonum(found, 0, INT64_MAX, &errstr);
 			if (errstr != NULL)
@@ -5642,6 +5647,7 @@ format_expand1(struct format_expand_state *es, const char *fmt)
 	format_log(es, "expanding format: %s", fmt);
 
 	if ((es->flags & FORMAT_EXPAND_TIME) && strchr(fmt, '%') != NULL) {
+		ft->time_expanded = 1;
 		if (es->time == 0) {
 			es->time = time(NULL);
 			localtime_r(&es->time, &es->tm);
@@ -5824,6 +5830,12 @@ format_single(struct cmdq_item *item, const char *fmt, struct client *c,
 	expanded = format_expand(ft, fmt);
 	format_free(ft);
 	return (expanded);
+}
+
+int
+format_has_time(struct format_tree *ft)
+{
+	return (ft->time_expanded);
 }
 
 /* Expand a single string using state. */
