@@ -5661,6 +5661,9 @@ format_expand1(struct format_expand_state *es, const char *fmt)
 		fmt = expanded;
 	}
 
+	if (strchr(fmt, '#') == NULL)
+		return (xstrdup(fmt));
+
 	len = 64;
 	buf = xmalloc(len);
 	off = 0;
