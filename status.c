@@ -337,6 +337,9 @@ status_init(struct client *c)
 
 	for (i = 0; i < nitems(sl->entries); i++)
 		TAILQ_INIT(&sl->entries[i].ranges);
+	memset(sl->entries, 0, sizeof sl->entries);
+	for (i = 0; i < nitems(sl->entries); i++)
+		TAILQ_INIT(&sl->entries[i].ranges);
 
 	screen_init(&sl->screen, c->tty.sx, 1, 0);
 	sl->active = &sl->screen;
@@ -439,6 +442,8 @@ status_redraw(struct client *c)
 			expanded = format_expand_time(ft, ov->string);
 			if (!force &&
 			    sle->expanded != NULL &&
+			    sle->format == ov->string &&
+			    sle->expanded_time == current_time &&
 			    strcmp(expanded, sle->expanded) == 0) {
 				free(expanded);
 				continue;
@@ -450,13 +455,15 @@ status_redraw(struct client *c)
 			screen_write_cursormove(&ctx, 0, i, 0);
 
 			status_free_ranges(&sle->ranges);
-			format_draw(&ctx, &gc, width, expanded, &sle->ranges,
-			    0);
+				format_draw(&ctx, &gc, width, expanded, &sle->ranges,
+				    0);
 
-			free(sle->expanded);
-			sle->expanded = expanded;
+				free(sle->expanded);
+				sle->expanded = expanded;
+				sle->format = ov->string;
+				sle->expanded_time = current_time;
+			}
 		}
-	}
 	screen_write_stop(&ctx);
 
 	/* Free the format tree. */

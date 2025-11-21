@@ -2657,6 +2657,7 @@ server_client_loop(void)
 	struct client		*c;
 	struct window		*w;
 	struct window_pane	*wp;
+	int			 theme_needed = 0;
 
 	/* Check for window resize. This is done before redrawing. */
 	RB_FOREACH(w, windows, &windows)
@@ -2676,21 +2677,25 @@ server_client_loop(void)
 	 * Any windows will have been redrawn as part of clients, so clear
 	 * their flags now.
 	 */
-	RB_FOREACH(w, windows, &windows) {
-		TAILQ_FOREACH(wp, &w->panes, entry) {
-			if (wp->fd != -1) {
-				server_client_check_pane_resize(wp);
-				server_client_check_pane_buffer(wp);
+		RB_FOREACH(w, windows, &windows) {
+			TAILQ_FOREACH(wp, &w->panes, entry) {
+				if (wp->fd != -1) {
+					server_client_check_pane_resize(wp);
+					server_client_check_pane_buffer(wp);
+				}
+				wp->flags &= ~(PANE_REDRAW|PANE_REDRAWSCROLLBAR);
+				if (!theme_needed && (wp->flags & PANE_THEMECHANGED))
+					theme_needed = 1;
 			}
-			wp->flags &= ~(PANE_REDRAW|PANE_REDRAWSCROLLBAR);
+			check_window_name(w);
 		}
-		check_window_name(w);
-	}
 
 	/* Send theme updates. */
-	RB_FOREACH(w, windows, &windows) {
-		TAILQ_FOREACH(wp, &w->panes, entry)
-			window_pane_send_theme_update(wp);
+	if (theme_needed) {
+		RB_FOREACH(w, windows, &windows) {
+			TAILQ_FOREACH(wp, &w->panes, entry)
+				window_pane_send_theme_update(wp);
+		}
 	}
 }
 

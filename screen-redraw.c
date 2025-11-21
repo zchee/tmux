@@ -485,6 +485,14 @@ screen_redraw_make_pane_status(struct client *c, struct window_pane *wp,
 		wp->status_size = width = 0;
 	else
 		wp->status_size = width = wp->sx + sb_w - 2;
+	if (width == wp->status_cached_width &&
+	    wp->status_cached_expanded != NULL &&
+	    strcmp(expanded, wp->status_cached_expanded) == 0 &&
+	    grid_cells_equal(&gc, &wp->status_cached_gc)) {
+		free(expanded);
+		format_free(ft);
+		return (0);
+	}
 
 	memcpy(&old, &wp->status_screen, sizeof old);
 	screen_init(&wp->status_screen, width, 1, 0);
@@ -508,7 +516,10 @@ screen_redraw_make_pane_status(struct client *c, struct window_pane *wp,
 	format_draw(&ctx, &gc, width, expanded, NULL, 0);
 	screen_write_stop(&ctx);
 
-	free(expanded);
+	free(wp->status_cached_expanded);
+	wp->status_cached_expanded = expanded;
+	wp->status_cached_width = width;
+	memcpy(&wp->status_cached_gc, &gc, sizeof wp->status_cached_gc);
 	format_free(ft);
 
 	if (grid_compare(wp->status_screen.grid, old.grid) == 0) {
@@ -594,8 +605,10 @@ screen_redraw_update(struct screen_redraw_ctx *ctx, uint64_t flags)
 		redraw = status_message_redraw(c);
 	else if (c->prompt_string != NULL)
 		redraw = status_prompt_redraw(c);
-	else
+	else if (flags & (CLIENT_REDRAWSTATUS|CLIENT_REDRAWSTATUSALWAYS))
 		redraw = status_redraw(c);
+	else
+		redraw = 0;
 	if (!redraw && (~flags & CLIENT_REDRAWSTATUSALWAYS))
 		flags &= ~CLIENT_REDRAWSTATUS;
 

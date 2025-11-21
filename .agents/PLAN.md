@@ -26,3 +26,23 @@
 ### Follow-up Ideas
 - Promote the readiness counter to metrics (e.g., `tmux display-message #{cmdq_ready}`) for easier introspection.
 - Explore integrating libevent timers so a newly ready queue can wake the loop immediately rather than waiting for the next event tick.
+
+## Performance Recon (2025-11-21)
+- Status line work still recreates a full `format_tree` and re-expands every `status-format` line on each timer tick even when the rendered text is unchanged (`status.c` around `status_redraw`). We could cache per-format expansions (or a compiled AST) keyed by the format string and a dependency mask (time/job/content) and skip both expansion and draw when inputs are unchanged.
+- Pane border status redraw (`screen_redraw_make_pane_status` in `screen-redraw.c`) always builds a new format tree, expands the format, reinitializes a 1-line screen, and draws it for every visible pane, then compares grids afterward. Memoizing the expanded string + width per pane and short-circuiting when unchanged would drop per-redraw cost in multi-pane layouts.
+- `format_find` (format.c ~3926) walks up to six option trees and hits `format_table` for every key lookup with no per-tree memoization. Adding a simple per-`format_tree` cache of resolved keys (including option hits) would shrink repeated lookups inside a single expansion (hot for status/pane formats with repeated keys and nested expansions).
+
+### 2025-11-21 Changes
+- Implemented a per-`format_tree` lookup cache in `format_find`, covering option/env/table hits and time conversions; tree alloc/frees now manage cached entries. Expect reduced CPU in deep format expansions (status lines, pane borders, menu drawing) without behavior changes.
+- Local `make format.o ...` initially failed due to missing toolchain path (`/Applications/Xcode-26.2.0-Beta.2.app/.../clang`); reran successfully after toolchain path was fixed.
+
+### 2025-11-21 Pane Border Cache
+- Added per-pane cache of the expanded `pane-border-format`, derived width, and applied grid cell. If width, content, and style match the previous values, we skip rebuilding the pane status screen and return early. Cached state is allocated in `window.c` and freed on pane destroy. This reduces per-redraw work when pane-border-status is enabled and unchanged.
+- Status line per-line cache: each `status-format` entry now remembers the originating format pointer and the expansion time, skipping re-expansion within the same server tick when nothing changed. This trims repeated format parsing when multiple redraws happen in a short window.
+- Theme update sweep shortcut: before walking every pane each loop, we now test if any pane has `PANE_THEMECHANGED`; if none, we skip the theme update pass (server-client.c). Reduces pointless per-loop pane scans in steady state.
+
+## Future Performance Roadmap (rolling)
+- Detect purely static status formats (no time/job tokens) and skip the periodic status redraw entirely until a dependency flips (option change, message/prompt, force redraw). Removes default 1 Hz wakeups on idle sessions.
+- Short-circuit status message/prompt redraws: avoid full screen copies when only the prompt buffer changes by overwriting the relevant line.
+- Defer automatic-rename formatting when a window is not visible in any attached client; refresh when it becomes visible. Prevents background rename churn on noisy panes.
+- Investigate adaptive status timer backoff: lengthen status timer when no flagged changes occur; reset on any dependency change.

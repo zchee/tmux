@@ -191,6 +191,21 @@ struct format_entry {
 	RB_ENTRY(format_entry)	 entry;
 };
 
+/* Cached lookup result. */
+struct format_cache_entry {
+	char			*key;
+	char			*time_format;
+	int			 modifiers;
+	char			*value;
+	RB_ENTRY(format_cache_entry) entry;
+};
+
+static int format_cache_cmp(struct format_cache_entry *,
+    struct format_cache_entry *);
+RB_HEAD(format_cache_tree, format_cache_entry);
+RB_GENERATE_STATIC(format_cache_tree, format_cache_entry, entry,
+    format_cache_cmp);
+
 /* Format type. */
 enum format_type {
 	FORMAT_TYPE_UNKNOWN,
@@ -229,9 +244,25 @@ struct format_tree {
 	struct mouse_event	 m;
 
 	RB_HEAD(format_entry_tree, format_entry) tree;
+	struct format_cache_tree cache;
 };
 static int format_entry_cmp(struct format_entry *, struct format_entry *);
 RB_GENERATE_STATIC(format_entry_tree, format_entry, entry, format_entry_cmp);
+
+/* Format cache comparison function. */
+static int
+format_cache_cmp(struct format_cache_entry *fce1,
+    struct format_cache_entry *fce2)
+{
+	int	r;
+
+	r = strcmp(fce1->key, fce2->key);
+	if (r != 0)
+		return (r);
+	if (fce1->modifiers != fce2->modifiers)
+		return (fce1->modifiers < fce2->modifiers ? -1 : 1);
+	return (strcmp(fce1->time_format, fce2->time_format));
+}
 
 /* Format expand state. */
 struct format_expand_state {
@@ -3677,6 +3708,7 @@ format_create(struct client *c, struct cmdq_item *item, int tag, int flags)
 
 	ft = xcalloc(1, sizeof *ft);
 	RB_INIT(&ft->tree);
+	RB_INIT(&ft->cache);
 
 	if (c != NULL) {
 		ft->client = c;
@@ -3698,12 +3730,20 @@ void
 format_free(struct format_tree *ft)
 {
 	struct format_entry	*fe, *fe1;
+	struct format_cache_entry *fce, *fce1;
 
 	RB_FOREACH_SAFE(fe, format_entry_tree, &ft->tree, fe1) {
 		RB_REMOVE(format_entry_tree, &ft->tree, fe);
 		free(fe->value);
 		free(fe->key);
 		free(fe);
+	}
+	RB_FOREACH_SAFE(fce, format_cache_tree, &ft->cache, fce1) {
+		RB_REMOVE(format_cache_tree, &ft->cache, fce);
+		free(fce->value);
+		free(fce->key);
+		free(fce->time_format);
+		free(fce);
 	}
 
 	if (ft->client != NULL)
@@ -3936,6 +3976,17 @@ format_find(struct format_tree *ft, const char *key, int modifiers,
 	const char			*errstr;
 	time_t				 t = 0;
 	struct tm			 tm;
+	struct format_cache_entry	*ce;
+	struct format_cache_entry	 ce_find;
+	const char			*tfmt;
+
+	tfmt = (time_format == NULL ? "" : time_format);
+	ce_find.key = (char *)key;
+	ce_find.time_format = (char *)tfmt;
+	ce_find.modifiers = modifiers;
+	ce = RB_FIND(format_cache_tree, &ft->cache, &ce_find);
+	if (ce != NULL)
+		return (xstrdup(ce->value));
 
 	o = options_parse_get(global_options, key, &idx, 0);
 	if (o == NULL && ft->wp != NULL)
@@ -4014,7 +4065,7 @@ found:
 			}
 			found = xstrdup(s);
 		}
-		return (found);
+		goto cache_and_return;
 	}
 
 	if (t != 0)
@@ -4040,6 +4091,19 @@ found:
 		saved = found;
 		found = format_quote_style(saved);
 		free(saved);
+	}
+
+cache_and_return:
+	ce = xmalloc(sizeof *ce);
+	ce->key = xstrdup(key);
+	ce->time_format = xstrdup(tfmt);
+	ce->modifiers = modifiers;
+	ce->value = xstrdup(found);
+	if (RB_INSERT(format_cache_tree, &ft->cache, ce) != NULL) {
+		free(ce->value);
+		free(ce->key);
+		free(ce->time_format);
+		free(ce);
 	}
 	return (found);
 }

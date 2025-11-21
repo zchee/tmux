@@ -963,6 +963,9 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 	window_pane_default_cursor(wp);
 
 	screen_init(&wp->status_screen, 1, 1, 0);
+	wp->status_cached_expanded = NULL;
+	memset(&wp->status_cached_gc, 0, sizeof wp->status_cached_gc);
+	wp->status_cached_width = 0;
 
 	if (gethostname(host, sizeof host) == 0)
 		screen_set_title(&wp->base, host);
@@ -998,6 +1001,9 @@ window_pane_destroy(struct window_pane *wp)
 		bufferevent_free(wp->pipe_event);
 		close(wp->pipe_fd);
 	}
+
+	free(wp->status_cached_expanded);
+	wp->status_cached_width = 0;
 
 	if (event_initialized(&wp->resize_timer))
 		event_del(&wp->resize_timer);
