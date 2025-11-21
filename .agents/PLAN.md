@@ -41,8 +41,11 @@
 - Status line per-line cache: each `status-format` entry now remembers the originating format pointer and the expansion time, skipping re-expansion within the same server tick when nothing changed. This trims repeated format parsing when multiple redraws happen in a short window.
 - Theme update sweep shortcut: before walking every pane each loop, we now test if any pane has `PANE_THEMECHANGED`; if none, we skip the theme update pass (server-client.c). Reduces pointless per-loop pane scans in steady state.
 
+### 2025-11-21 Static Status Timer
+- Added `format_has_time` tracking to flag status formats that expand time or time-like fields. Status redraw now records whether any line needed time; the status timer only reschedules when time is present, eliminating the default 1 Hz wakeups for purely static formats.
+- Safe fallback: timers restart on option changes or capability changes via existing `status_timer_start*` call sites, so switching to a time-bearing format re-enables periodic redraws automatically.
+
 ## Future Performance Roadmap (rolling)
-- Detect purely static status formats (no time/job tokens) and skip the periodic status redraw entirely until a dependency flips (option change, message/prompt, force redraw). Removes default 1 Hz wakeups on idle sessions.
 - Short-circuit status message/prompt redraws: avoid full screen copies when only the prompt buffer changes by overwriting the relevant line.
 - Defer automatic-rename formatting when a window is not visible in any attached client; refresh when it becomes visible. Prevents background rename churn on noisy panes.
 - Investigate adaptive status timer backoff: lengthen status timer when no flagged changes occur; reset on any dependency change.
