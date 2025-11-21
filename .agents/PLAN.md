@@ -53,3 +53,21 @@
 - Short-circuit status message/prompt redraws: avoid full screen copies when only the prompt buffer changes by overwriting the relevant line.
 - Defer automatic-rename formatting when a window is not visible in any attached client; refresh when it becomes visible. Prevents background rename churn on noisy panes.
 - Investigate adaptive status timer backoff: lengthen status timer when no flagged changes occur; reset on any dependency change.
+
+## New Backlog (2025-11-21)
+- Incremental reflow: only rewrap lines that overflow/underflow on resize instead of walking full history; keep per-line wrap metadata to bound work to changed rows. Risks: WRAPPED flag consistency, history scroll offsets.
+- Status prompt/message short-circuit: redraw just the prompt line instead of screen_copy of the entire status buffer when only prompt text changes. Need to ensure cursor style/colour updates still apply.
+- Shared format AST + dependency mask: pre-parse format strings once, reuse across redraws, and track dynamic tokens (time/jobs/options) to skip parsing and known-stable subtrees.
+
+### Recent Micro-Optimizations (for context)
+- Skipped status timer when formats are static (format_has_time + status_has_time).
+- Fast-path format expansion when no `#` placeholders after strftime.
+- Suppressed automatic rename for windows invisible to attached clients.
+- Reflow guards for unchanged width and for cases where all lines already fit the new width.
+
+### 2025-11-21 Q&A Notes
+- Next step for the Dramatic Performance Improvement Backlog: start with the first item under “New Backlog (2025-11-21)” — the incremental reflow optimization (rewrap only overflow/underflow lines on resize).
+
+### 2025-11-21 Incremental Reflow Work
+- Added cached line-width metadata (`GRID_LINE_WIDTHVALID` + `cached_width`) so reflow checks reuse computed widths instead of rescanning extended cells every resize; caches are invalidated on line edits.
+- grid_reflow now skips untouched leading lines and measures line width via the cache helper, then rewraps only from the first line that overflows/was wrapped; updates `gd->sx` on completion.
