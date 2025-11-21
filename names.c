@@ -30,6 +30,21 @@ static int	 name_time_expired(struct window *, struct timeval *);
 
 static char	*format_window_name(struct window *);
 
+static int
+window_is_visible(struct window *w)
+{
+	struct session	*s;
+
+	RB_FOREACH(s, sessions, &sessions) {
+		if (s->attached == 0)
+			continue;
+		if (s->curw != NULL && s->curw->window == w)
+			return (1);
+	}
+
+	return (0);
+}
+
 static void
 name_time_callback(__unused int fd, __unused short events, void *arg)
 {
@@ -65,6 +80,10 @@ check_window_name(struct window *w)
 
 	if (~w->active->flags & PANE_CHANGED) {
 		log_debug("@%u active pane not changed", w->id);
+		return;
+	}
+	if (!window_is_visible(w)) {
+		log_debug("@%u not visible in an attached session", w->id);
 		return;
 	}
 	log_debug("@%u active pane changed", w->id);
