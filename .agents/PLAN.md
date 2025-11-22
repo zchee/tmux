@@ -74,3 +74,6 @@
 
 ### 2025-11-22 Prompt/Message Short-Circuit
 - status_message_redraw/status_prompt_redraw now reuse the existing active status screen when size is unchanged and only copy the prompt/message line from the base screen before painting text, avoiding a full screen_copy on every keystroke while keeping cursor colour/style updates intact.
+
+### 2025-11-22 Shared Format AST Cache (first pass)
+- Added a cached parse for format strings without time tokens: formats are tokenized once into literal/replace/job pieces and reused across expansions, bypassing the per-call scan in format_expand1; job detection still works and time-bearing formats fall back to the legacy path.
