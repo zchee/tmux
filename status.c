@@ -569,6 +569,7 @@ status_message_redraw(struct client *c)
 	u_int			 lines, offset, messageline;
 	struct grid_cell	 gc;
 	struct format_tree	*ft;
+	int			 resized;
 
 	if (c->tty.sx == 0 || c->tty.sy == 0)
 		return (0);
@@ -577,7 +578,10 @@ status_message_redraw(struct client *c)
 	lines = status_line_size(c);
 	if (lines <= 1)
 		lines = 1;
-	screen_init(sl->active, c->tty.sx, lines, 0);
+	resized = screen_size_x(sl->active) != c->tty.sx ||
+	    screen_size_y(sl->active) != lines;
+	if (resized)
+		screen_init(sl->active, c->tty.sx, lines, 0);
 
 	messageline = status_prompt_line_at(c);
 	if (messageline > lines - 1)
@@ -592,7 +596,12 @@ status_message_redraw(struct client *c)
 	format_free(ft);
 
 	screen_write_start(&ctx, sl->active);
-	screen_write_fast_copy(&ctx, &sl->screen, 0, 0, c->tty.sx, lines);
+	if (resized)
+		screen_write_fast_copy(&ctx, &sl->screen, 0, 0, c->tty.sx,
+		    lines);
+	else
+		screen_write_fast_copy(&ctx, &sl->screen, 0, messageline,
+		    c->tty.sx, 1);
 	screen_write_cursormove(&ctx, 0, messageline, 0);
 	for (offset = 0; offset < c->tty.sx; offset++)
 		screen_write_putc(&ctx, &gc, ' ');
@@ -798,6 +807,7 @@ status_prompt_redraw(struct client *c)
 	struct grid_cell	 gc;
 	struct format_tree	*ft = c->prompt_formats;
 	char			*prompt, *tmp;
+	int			 resized;
 
 	if (c->tty.sx == 0 || c->tty.sy == 0)
 		return (0);
@@ -806,7 +816,10 @@ status_prompt_redraw(struct client *c)
 	lines = status_line_size(c);
 	if (lines <= 1)
 		lines = 1;
-	screen_init(sl->active, c->tty.sx, lines, 0);
+	resized = screen_size_x(sl->active) != c->tty.sx ||
+	    screen_size_y(sl->active) != lines;
+	if (resized)
+		screen_init(sl->active, c->tty.sx, lines, 0);
 
 	n = options_get_number(s->options, "prompt-cursor-colour");
 	sl->active->default_ccolour = n;
@@ -833,7 +846,12 @@ status_prompt_redraw(struct client *c)
 		start = c->tty.sx;
 
 	screen_write_start(&ctx, sl->active);
-	screen_write_fast_copy(&ctx, &sl->screen, 0, 0, c->tty.sx, lines);
+	if (resized)
+		screen_write_fast_copy(&ctx, &sl->screen, 0, 0, c->tty.sx,
+		    lines);
+	else
+		screen_write_fast_copy(&ctx, &sl->screen, 0, promptline,
+		    c->tty.sx, 1);
 	screen_write_cursormove(&ctx, 0, promptline, 0);
 	for (offset = 0; offset < c->tty.sx; offset++)
 		screen_write_putc(&ctx, &gc, ' ');
