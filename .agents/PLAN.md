@@ -71,3 +71,6 @@
 ### 2025-11-21 Incremental Reflow Work
 - Added cached line-width metadata (`GRID_LINE_WIDTHVALID` + `cached_width`) so reflow checks reuse computed widths instead of rescanning extended cells every resize; caches are invalidated on line edits.
 - grid_reflow now skips untouched leading lines and measures line width via the cache helper, then rewraps only from the first line that overflows/was wrapped; updates `gd->sx` on completion.
+
+### 2025-11-22 Prompt/Message Short-Circuit
+- status_message_redraw/status_prompt_redraw now reuse the existing active status screen when size is unchanged and only copy the prompt/message line from the base screen before painting text, avoiding a full screen_copy on every keystroke while keeping cursor colour/style updates intact.
