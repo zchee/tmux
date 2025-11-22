@@ -51,6 +51,10 @@ static void	 format_defaults_session(struct format_tree *,
 static void	 format_defaults_client(struct format_tree *, struct client *);
 static void	 format_defaults_winlink(struct format_tree *,
 		     struct winlink *);
+static struct format_template *format_template_get(const char *);
+static void	 format_template_free(struct format_template *);
+static const char *format_upper[];
+static const char *format_lower[];
 
 /* Entry in format job tree. */
 struct format_job_subscription {
@@ -200,12 +204,199 @@ struct format_cache_entry {
 	RB_ENTRY(format_cache_entry) entry;
 };
 
+/* Cached parsed format template. */
+struct format_template_piece {
+	char	*data;
+	size_t	 len;
+	int	 type;
+#define FORMAT_PIECE_LITERAL 0
+#define FORMAT_PIECE_REPLACE 1
+#define FORMAT_PIECE_JOB     2
+};
+
+struct format_template {
+	char			*fmt;
+	struct format_template_piece *pieces;
+	u_int			 n_pieces;
+	int			 has_jobs;
+	int			 has_time;
+	RB_ENTRY(format_template) entry;
+};
+
+static int format_template_cmp(struct format_template *,
+    struct format_template *);
+RB_HEAD(format_template_tree, format_template);
+static struct format_template_tree format_templates =
+    RB_INITIALIZER(&format_templates);
+RB_GENERATE_STATIC(format_template_tree, format_template, entry,
+    format_template_cmp);
+
 static int format_cache_cmp(struct format_cache_entry *,
     struct format_cache_entry *);
 RB_HEAD(format_cache_tree, format_cache_entry);
 RB_GENERATE_STATIC(format_cache_tree, format_cache_entry, entry,
     format_cache_cmp);
 
+static void
+format_template_free(struct format_template *ftl)
+{
+	u_int	i;
+
+	for (i = 0; i < ftl->n_pieces; i++)
+		free(ftl->pieces[i].data);
+	free(ftl->pieces);
+	free(ftl->fmt);
+	free(ftl);
+}
+
+static struct format_template *
+format_template_get(const char *fmt)
+{
+	struct format_template	 find, *ftl;
+	const char		*s, *ptr;
+	size_t			 i, n, off, len;
+	int			 ch, brackets;
+
+	find.fmt = (char *)fmt;
+	ftl = RB_FIND(format_template_tree, &format_templates, &find);
+	if (ftl != NULL)
+		return (ftl);
+
+	/* Do not cache formats with time placeholders - handled per call. */
+	if (strchr(fmt, '%') != NULL)
+		return (NULL);
+
+	ftl = xcalloc(1, sizeof *ftl);
+	ftl->fmt = xstrdup(fmt);
+	ftl->pieces = NULL;
+	ftl->n_pieces = 0;
+	ftl->has_jobs = 0;
+	ftl->has_time = 0;
+
+	len = strlen(fmt);
+	off = 0;
+	while (off < len) {
+		/* Gather literal until next '#'. */
+		i = off;
+		while (i < len && fmt[i] != '#')
+			i++;
+		if (i > off) {
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			ftl->pieces[ftl->n_pieces].type = FORMAT_PIECE_LITERAL;
+			ftl->pieces[ftl->n_pieces].data =
+			    xstrndup(fmt + off, i - off);
+			ftl->pieces[ftl->n_pieces].len = i - off;
+			ftl->n_pieces++;
+			off = i;
+			if (off >= len)
+				break;
+		}
+
+		/* fmt[off] == '#' */
+		if (off + 1 >= len) {
+			/* trailing #, treat as literal */
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			ftl->pieces[ftl->n_pieces].type = FORMAT_PIECE_LITERAL;
+			ftl->pieces[ftl->n_pieces].data = xstrdup("#");
+			ftl->pieces[ftl->n_pieces].len = 1;
+			ftl->n_pieces++;
+			break;
+		}
+
+		ch = (u_char)fmt[++off];
+		off++;
+		switch (ch) {
+		case '(':
+			brackets = 1;
+			for (ptr = fmt + off; *ptr != '\0'; ptr++) {
+				if (*ptr == '(')
+					brackets++;
+				if (*ptr == ')' && --brackets == 0)
+					break;
+			}
+			if (*ptr != ')' || brackets != 0) {
+				format_template_free(ftl);
+				return (NULL);
+			}
+			n = ptr - (fmt + off);
+			ftl->has_jobs = 1;
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			ftl->pieces[ftl->n_pieces].type = FORMAT_PIECE_JOB;
+			ftl->pieces[ftl->n_pieces].data =
+			    xstrndup(fmt + off, n);
+			ftl->pieces[ftl->n_pieces].len = n;
+			ftl->n_pieces++;
+			off += n + 1;
+			break;
+		case '{':
+			ptr = format_skip((char *)fmt + off - 2, "}");
+			if (ptr == NULL) {
+				format_template_free(ftl);
+				return (NULL);
+			}
+			n = ptr - (fmt + off);
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			ftl->pieces[ftl->n_pieces].type = FORMAT_PIECE_REPLACE;
+			ftl->pieces[ftl->n_pieces].data =
+			    xstrndup(fmt + off, n);
+			ftl->pieces[ftl->n_pieces].len = n;
+			ftl->n_pieces++;
+			off += n + 1;
+			break;
+		case '[':
+		case '#':
+			format_template_free(ftl);
+			return (NULL);
+		case '}':
+		case ',':
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			ftl->pieces[ftl->n_pieces].type = FORMAT_PIECE_LITERAL;
+			ftl->pieces[ftl->n_pieces].data = xmalloc(3);
+			ftl->pieces[ftl->n_pieces].data[0] = '#';
+			ftl->pieces[ftl->n_pieces].data[1] = ch;
+			ftl->pieces[ftl->n_pieces].data[2] = '\0';
+			ftl->pieces[ftl->n_pieces].len = 2;
+			ftl->n_pieces++;
+			break;
+		default:
+			if (ch >= 'A' && ch <= 'Z')
+				s = format_upper[ch - 'A'];
+			else if (ch >= 'a' && ch <= 'z')
+				s = format_lower[ch - 'a'];
+			else
+				s = NULL;
+
+			ftl->pieces = xrecallocarray(ftl->pieces, ftl->n_pieces,
+			    ftl->n_pieces + 1, sizeof *ftl->pieces);
+			if (s != NULL) {
+				n = strlen(s);
+				ftl->pieces[ftl->n_pieces].type =
+				    FORMAT_PIECE_REPLACE;
+				ftl->pieces[ftl->n_pieces].data =
+				    xstrndup(s, n);
+				ftl->pieces[ftl->n_pieces].len = n;
+			} else {
+				ftl->pieces[ftl->n_pieces].type =
+				    FORMAT_PIECE_LITERAL;
+				ftl->pieces[ftl->n_pieces].data = xmalloc(3);
+				ftl->pieces[ftl->n_pieces].data[0] = '#';
+				ftl->pieces[ftl->n_pieces].data[1] = ch;
+				ftl->pieces[ftl->n_pieces].data[2] = '\0';
+				ftl->pieces[ftl->n_pieces].len = 2;
+			}
+			ftl->n_pieces++;
+			break;
+		}
+	}
+
+	RB_INSERT(format_template_tree, &format_templates, ftl);
+	return (ftl);
+}
 /* Format type. */
 enum format_type {
 	FORMAT_TYPE_UNKNOWN,
@@ -263,6 +454,12 @@ format_cache_cmp(struct format_cache_entry *fce1,
 	if (fce1->modifiers != fce2->modifiers)
 		return (fce1->modifiers < fce2->modifiers ? -1 : 1);
 	return (strcmp(fce1->time_format, fce2->time_format));
+}
+
+static int
+format_template_cmp(struct format_template *ft1, struct format_template *ft2)
+{
+	return (strcmp(ft1->fmt, ft2->fmt));
 }
 
 /* Format expand state. */
@@ -5629,10 +5826,11 @@ static char *
 format_expand1(struct format_expand_state *es, const char *fmt)
 {
 	struct format_tree	*ft = es->ft;
+	struct format_template	*tpl = NULL;
 	char			*buf, *out, *name;
 	const char		*ptr, *s, *style_end = NULL;
 	size_t			 off, len, n, outlen;
-	int			 ch, brackets;
+	int			 ch, brackets, used_time = 0;
 	char			 expanded[8192];
 
 	if (fmt == NULL || *fmt == '\0')
@@ -5647,6 +5845,7 @@ format_expand1(struct format_expand_state *es, const char *fmt)
 	format_log(es, "expanding format: %s", fmt);
 
 	if ((es->flags & FORMAT_EXPAND_TIME) && strchr(fmt, '%') != NULL) {
+		used_time = 1;
 		ft->time_expanded = 1;
 		if (es->time == 0) {
 			es->time = time(NULL);
@@ -5663,6 +5862,51 @@ format_expand1(struct format_expand_state *es, const char *fmt)
 
 	if (strchr(fmt, '#') == NULL)
 		return (xstrdup(fmt));
+
+	if (!used_time)
+		tpl = format_template_get(fmt);
+
+	if (tpl != NULL) {
+		len = 64;
+		buf = xmalloc(len);
+		off = 0;
+
+		for (n = 0; n < tpl->n_pieces; n++) {
+			struct format_template_piece *pc = &tpl->pieces[n];
+
+			if (pc->type == FORMAT_PIECE_LITERAL) {
+				while (len - off < pc->len + 1) {
+					buf = xreallocarray(buf, 2, len);
+					len *= 2;
+				}
+				memcpy(buf + off, pc->data, pc->len);
+				off += pc->len;
+				continue;
+			}
+
+			if (pc->type == FORMAT_PIECE_JOB) {
+				out = format_job_get(es, pc->data);
+				outlen = strlen(out);
+				while (len - off < outlen + 1) {
+					buf = xreallocarray(buf, 2, len);
+					len *= 2;
+				}
+				memcpy(buf + off, out, outlen);
+				off += outlen;
+				free(out);
+				continue;
+			}
+
+			/* FORMAT_PIECE_REPLACE */
+			if (format_replace(es, pc->data, pc->len, &buf, &len,
+			    &off) != 0)
+				break;
+		}
+		buf[off] = '\0';
+		es->loop--;
+		format_log(es, "result is (cached parse): %s", buf);
+		return (buf);
+	}
 
 	len = 64;
 	buf = xmalloc(len);
