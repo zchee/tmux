@@ -77,3 +77,14 @@
 
 ### 2025-11-22 Shared Format AST Cache (first pass)
 - Added a cached parse for format strings without time tokens: formats are tokenized once into literal/replace/job pieces and reused across expansions, bypassing the per-call scan in format_expand1; job detection still works and time-bearing formats fall back to the legacy path.
+
+### 2025-11-22 Working Notes / Future Recall
+- Planned tasks: finish “shared format AST + dependency mask” by broadening cache coverage to style-containing formats (`#[`) and adding dependency masks for option/env/time awareness to avoid stale outputs; consider option-versioning or hash of static inputs. Design a cheap invalidation path keyed by option generations.
+- Faced issues: to keep parity, the new cache currently skips time-bearing and styled formats; also still re-expands aliases and style markers through legacy path to avoid behavioural drift.
+- Roadmap: 1) Add dependency mask per template (time/option/job/env) and store option change counters so cache invalidates when inputs change. 2) Teach parser to handle `#[...]` blocks safely in the cached representation. 3) Add lightweight stats/log hooks to confirm cache hit rates on status/pane paths during profiling. 4) Once stable, enable cache for more call sites and add a debug format to expose cache hits (`#{format_cache_hits}`) for measurement.
+
+### 2025-11-23 Notes
+- User asked for the next step in the Dramatic Performance Improvement Backlog; reaffirmed the queued next action is the incremental reflow optimization (first item under “New Backlog (2025-11-21)”).
+- Implemented bounded reflow: `grid_reflow` now identifies both the first and last line needing reflow (overflow or wrapped) and skips measuring untouched trailing lines, copying them directly. This reduces work on large histories when only a short wrapped run needs adjustment.
+- Fixed reflow execution: removed the stale early-return guard in `grid_reflow` that prevented any reflow after `screen_resize_cursor` updated `grid->sx`, ensuring resize actually reflows content again.
+- Added regression `regress/reflow-incremental.sh` to validate widening reflows wrapped history correctly (10→15 columns, preserving content and wraps).
