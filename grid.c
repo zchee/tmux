@@ -1482,11 +1482,8 @@ grid_reflow(struct grid *gd, u_int sx)
 {
 	struct grid		*target;
 	struct grid_line	*gl;
-	u_int			 yy, width, at, start = 0, total;
+	u_int			 yy, width, at, start = 0, end = 0, total;
 	int			 needs_reflow = 0;
-
-	if (gd->sx == sx)
-		return;
 
 	total = gd->hsize + gd->sy;
 	for (yy = 0; yy < total; yy++) {
@@ -1509,6 +1506,20 @@ grid_reflow(struct grid *gd, u_int sx)
 		return;
 	}
 
+	/* Find the last line that needs reflow so we can skip an untouched tail. */
+	end = start;
+	for (yy = total; yy-- > start;) {
+		gl = &gd->linedata[yy];
+		if (gl->flags & GRID_LINE_DEAD)
+			continue;
+
+		grid_reflow_measure(gl, sx, &at, &width);
+		if (width > sx || (gl->flags & GRID_LINE_WRAPPED)) {
+			end = yy;
+			break;
+		}
+	}
+
 	/*
 	 * Create a destination grid. This is just used as a container for the
 	 * line data and may not be fully valid.
@@ -1526,7 +1537,7 @@ grid_reflow(struct grid *gd, u_int sx)
 	/*
 	 * Loop over each source line.
 	 */
-	for (yy = start; yy < total; yy++) {
+	for (yy = start; yy <= end; yy++) {
 		gl = &gd->linedata[yy];
 		if (gl->flags & GRID_LINE_DEAD)
 			continue;
@@ -1560,6 +1571,14 @@ grid_reflow(struct grid *gd, u_int sx)
 			grid_reflow_join(target, gd, sx, yy, width, 0);
 		else
 			grid_reflow_move(target, gl);
+	}
+
+	/* Copy any trailing lines that do not need reflow. */
+	for (yy = end + 1; yy < total; yy++) {
+		gl = &gd->linedata[yy];
+		if (gl->flags & GRID_LINE_DEAD)
+			continue;
+		grid_reflow_move(target, gl);
 	}
 
 	/*
