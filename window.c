@@ -500,6 +500,32 @@ window_pane_send_resize(struct window_pane *wp, u_int sx, u_int sy)
 		if (errno != EINVAL && errno != ENXIO)
 #endif
 		fatal("ioctl failed");
+	window_pane_send_resize_report(wp, sx, sy);
+}
+
+/*
+ * Send an in-band resize report (DECSET 2048) to the pane. The report pairs
+ * with the TIOCSWINSZ ioctl so applications that enable the mode see resizes
+ * as ordered escape sequences on their input instead of only SIGWINCH.
+ */
+void
+window_pane_send_resize_report(struct window_pane *wp, u_int sx, u_int sy)
+{
+	struct window	*w;
+	char		 buf[64];
+	int		 len;
+
+	if (wp == NULL || window_pane_exited(wp))
+		return;
+	if (~wp->screen->mode & MODE_RESIZE_REPORT)
+		return;
+	w = wp->window;
+
+	len = xsnprintf(buf, sizeof buf, "\033[48;%u;%u;%u;%ut", sy, sx,
+	    sy * w->ypixel, sx * w->xpixel);
+	if (len > 0)
+		bufferevent_write(wp->event, buf, len);
+	log_debug("%s: %%%u %ux%u", __func__, wp->id, sx, sy);
 }
 
 int
