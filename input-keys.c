@@ -708,6 +708,25 @@ input_key(struct screen *s, struct bufferevent *bev, key_code key)
 	}
 }
 
+/* Convert cell coordinates to pixels for SGR-Pixels (1016) reports. */
+static void
+input_key_mouse_pixels(struct mouse_event *m, u_int x, u_int y, u_int *px,
+    u_int *py)
+{
+	struct window	*w = NULL;
+	u_int		 xpixel = DEFAULT_XPIXEL, ypixel = DEFAULT_YPIXEL;
+
+	if (m->w != -1)
+		w = window_find_by_id(m->w);
+	if (w != NULL && w->xpixel != 0)
+		xpixel = w->xpixel;
+	if (w != NULL && w->ypixel != 0)
+		ypixel = w->ypixel;
+
+	*px = x * xpixel;
+	*py = y * ypixel;
+}
+
 /* Get mouse event string. */
 int
 input_key_get_mouse(struct screen *s, struct mouse_event *m, u_int x, u_int y,
@@ -715,6 +734,7 @@ input_key_get_mouse(struct screen *s, struct mouse_event *m, u_int x, u_int y,
 {
 	static char	 buf[40];
 	size_t		 len;
+	u_int		 px, py;
 
 	*rbuf = NULL;
 	*rlen = 0;
@@ -753,7 +773,16 @@ input_key_get_mouse(struct screen *s, struct mouse_event *m, u_int x, u_int y,
 	 * UTF-8 (1005) extension if the application requested, or to the
 	 * legacy format.
 	 */
-	if (m->sgr_type != ' ' && (s->mode & MODE_MOUSE_SGR)) {
+	if (m->sgr_type != ' ' && (s->mode & MODE_MOUSE_SGR_PIXELS)) {
+		/*
+		 * SGR-Pixels (1016). tmux only knows which cell the outer
+		 * terminal reported, so report the top-left pixel of that
+		 * cell; dividing by the cell size recovers the exact cell.
+		 */
+		input_key_mouse_pixels(m, x, y, &px, &py);
+		len = xsnprintf(buf, sizeof buf, "\033[<%u;%u;%u%c",
+		    m->sgr_b, px + 1, py + 1, m->sgr_type);
+	} else if (m->sgr_type != ' ' && (s->mode & MODE_MOUSE_SGR)) {
 		len = xsnprintf(buf, sizeof buf, "\033[<%u;%u;%u%c",
 		    m->sgr_b, x + 1, y + 1, m->sgr_type);
 	} else if (s->mode & MODE_MOUSE_UTF8) {
