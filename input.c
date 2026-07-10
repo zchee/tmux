@@ -1714,6 +1714,9 @@ input_csi_dispatch(struct input_ctx *ictx)
 		case 2031:	/* theme update notifications */
 			n = (s->mode & MODE_THEME_UPDATES) ? 1 : 2;
 			break;
+		case 2048:	/* in-band resize reports */
+			n = (s->mode & MODE_RESIZE_REPORT) ? 1 : 2;
+			break;
 		default:
 			n = 0;
 			break;
@@ -1982,6 +1985,9 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 		case 2026:
 			screen_write_end_sync(sctx);
 			break;
+		case 2048:
+			screen_write_mode_clear(sctx, MODE_RESIZE_REPORT);
+			break;
 		case 2031:
 			screen_write_mode_clear(sctx, MODE_THEME_UPDATES);
 			if (ictx->wp != NULL)
@@ -2092,6 +2098,13 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 			break;
 		case 2026:
 			screen_write_start_sync(wp);
+			break;
+		case 2048:
+			screen_write_mode_set(sctx, MODE_RESIZE_REPORT);
+			if (ictx->wp != NULL) {
+				window_pane_send_resize_report(ictx->wp,
+				    ictx->wp->sx, ictx->wp->sy);
+			}
 			break;
 		default:
 			log_debug("%s: unknown '%c'", __func__, ictx->ch);
