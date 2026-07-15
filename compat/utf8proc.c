@@ -64,3 +64,31 @@ utf8proc_wctomb(char *s, wchar_t wc)
 		return (-1);
 	return (utf8proc_encode_char(wc, s));
 }
+
+/*
+ * Is a grapheme cluster break permitted between the last codepoint of buf and
+ * next? Break state is replayed across the whole buffer so that stateful
+ * rules such as GB9c (Indic conjuncts) and GB11 (emoji ZWJ) apply.
+ */
+int
+utf8proc_grapheme_breakable(const char *buf, size_t len, wchar_t next)
+{
+	utf8proc_int32_t	state = 0, cp, last = -1;
+	utf8proc_ssize_t	off = 0, n;
+
+	while (off < (utf8proc_ssize_t)len) {
+		n = utf8proc_iterate((const utf8proc_uint8_t *)buf + off,
+		    len - off, &cp);
+		if (n <= 0 || cp < 0)
+			return (1);
+		if (last >= 0)
+			(void)utf8proc_grapheme_break_stateful(last, cp,
+			    &state);
+		last = cp;
+		off += n;
+	}
+	if (last < 0)
+		return (1);
+	return (utf8proc_grapheme_break_stateful(last,
+	    (utf8proc_int32_t)next, &state));
+}

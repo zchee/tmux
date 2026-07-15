@@ -797,6 +797,8 @@ screen_mode_to_string(int mode)
 		strlcat(tmp, "SYNC,", sizeof tmp);
 	if (mode & MODE_RESIZE_REPORT)
 		strlcat(tmp, "RESIZE_REPORT,", sizeof tmp);
+	if (mode & MODE_GRAPHEME_CLUSTERS)
+		strlcat(tmp, "GRAPHEME_CLUSTERS,", sizeof tmp);
 	if (*tmp != '\0')
 		tmp[strlen(tmp) - 1] = '\0';
 	return (tmp);

@@ -3053,7 +3053,8 @@ screen_write_combine(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 		zero_width = 1;
 	else if (utf8_is_vs(ud)) {
 		zero_width = 1;
-		if (options_get_number(oo, "variation-selector-always-wide"))
+		if ((s->mode & MODE_GRAPHEME_CLUSTERS) ||
+		    options_get_number(oo, "variation-selector-always-wide"))
 			force_wide = 1;
 	} else if (ud->width == 0)
 		zero_width = 1;
@@ -3092,15 +3093,20 @@ screen_write_combine(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 				force_wide = 1;
 			else if (utf8_should_combine(ud, &last.data))
 				force_wide = 1;
-			else if (!utf8_has_zwj(&last.data))
+			else if (!utf8_has_zwj(&last.data) &&
+			    ((~s->mode & MODE_GRAPHEME_CLUSTERS) ||
+			    !utf8_grapheme_joins(&last.data, ud)))
 				return (0);
 			break;
 		}
 	}
 
 	/* Check if this combined character would be too long. */
-	if (last.data.size + ud->size > sizeof last.data.data)
+	if (last.data.size + ud->size > sizeof last.data.data) {
+		log_debug("%s: %.*s would be too long, not combining", __func__,
+		    (int)ud->size, ud->data);
 		return (zero_width);
+	}
 
 	/* Combining; flush any pending output. */
 	screen_write_collect_flush(ctx, 0, __func__);

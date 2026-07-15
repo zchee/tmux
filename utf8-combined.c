@@ -316,3 +316,32 @@ hanguljamo_check_state(const struct utf8_data *p_ud, const struct utf8_data *ud)
 	}
 	return (HANGULJAMO_STATE_NOT_HANGULJAMO);
 }
+
+#ifdef HAVE_UTF8PROC
+/*
+ * Would UAX #29 keep the new character in the same extended grapheme cluster
+ * as the existing combined character (DECSET 2027)? Regional indicators are
+ * excluded: pair state lives in utf8_should_combine.
+ */
+int
+utf8_grapheme_joins(const struct utf8_data *prev, const struct utf8_data *add)
+{
+	wchar_t	a;
+
+	if (prev->size == 0)
+		return (0);
+	if (utf8_towc(add, &a) != UTF8_DONE)
+		return (0);
+	if (a >= 0x1F1E6 && a <= 0x1F1FF)
+		return (0);
+	return (!utf8proc_grapheme_breakable((const char *)prev->data,
+	    prev->size, a));
+}
+#else
+int
+utf8_grapheme_joins(__unused const struct utf8_data *prev,
+    __unused const struct utf8_data *add)
+{
+	return (0);
+}
+#endif

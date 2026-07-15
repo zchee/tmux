@@ -458,6 +458,7 @@ int		 systemd_move_to_new_cgroup(char **);
 int		 utf8proc_wcwidth(wchar_t);
 int		 utf8proc_mbtowc(wchar_t *, const char *, size_t);
 int		 utf8proc_wctomb(char *, wchar_t);
+int		 utf8proc_grapheme_breakable(const char *, size_t, wchar_t);
 #endif
 
 #ifdef NEED_FUZZING

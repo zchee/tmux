@@ -710,6 +710,7 @@ enum tty_code_code {
 #define MODE_THEME_UPDATES 0x80000
 #define MODE_SYNC 0x100000
 #define MODE_RESIZE_REPORT 0x200000
+#define MODE_GRAPHEME_CLUSTERS 0x400000
 
 #define ALL_MODES 0xffffff
 #define ALL_MOUSE_MODES (MODE_MOUSE_STANDARD|MODE_MOUSE_BUTTON|MODE_MOUSE_ALL)
@@ -4152,6 +4153,8 @@ int		 utf8_is_zwj(const struct utf8_data *);
 int		 utf8_is_vs(const struct utf8_data *);
 int		 utf8_is_hangul_filler(const struct utf8_data *);
 int		 utf8_should_combine(const struct utf8_data *,
+		    const struct utf8_data *);
+int		 utf8_grapheme_joins(const struct utf8_data *,
 		    const struct utf8_data *);
 enum hanguljamo_state hanguljamo_check_state(const struct utf8_data *,
 		    const struct utf8_data *);

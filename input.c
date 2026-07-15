@@ -1711,6 +1711,9 @@ input_csi_dispatch(struct input_ctx *ictx)
 		case 2026:	/* synchronized output */
 			n = (s->mode & MODE_SYNC) ? 1 : 2;
 			break;
+		case 2027:	/* grapheme cluster processing */
+			n = (s->mode & MODE_GRAPHEME_CLUSTERS) ? 1 : 2;
+			break;
 		case 2031:	/* theme update notifications */
 			n = (s->mode & MODE_THEME_UPDATES) ? 1 : 2;
 			break;
@@ -1985,6 +1988,9 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 		case 2026:
 			screen_write_end_sync(sctx);
 			break;
+		case 2027:
+			screen_write_mode_clear(sctx, MODE_GRAPHEME_CLUSTERS);
+			break;
 		case 2048:
 			screen_write_mode_clear(sctx, MODE_RESIZE_REPORT);
 			break;
@@ -2098,6 +2104,9 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 			break;
 		case 2026:
 			screen_write_start_sync(wp);
+			break;
+		case 2027:
+			screen_write_mode_set(sctx, MODE_GRAPHEME_CLUSTERS);
 			break;
 		case 2048:
 			screen_write_mode_set(sctx, MODE_RESIZE_REPORT);
