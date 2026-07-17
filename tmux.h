@@ -3555,6 +3555,8 @@ void	 grid_view_clear_history(struct grid *, u_int);
 void	 grid_view_clear(struct grid *, u_int, u_int, u_int, u_int, u_int);
 void	 grid_view_scroll_region_up(struct grid *, u_int, u_int, u_int);
 void	 grid_view_scroll_region_down(struct grid *, u_int, u_int, u_int);
+void	 grid_view_scroll_pad_region(struct grid *, u_int, u_int, u_int, u_int,
+	     int, u_int, u_int);
 void	 grid_view_insert_lines(struct grid *, u_int, u_int, u_int);
 void	 grid_view_insert_lines_region(struct grid *, u_int, u_int, u_int,
 	     u_int);
@@ -3562,7 +3564,11 @@ void	 grid_view_delete_lines(struct grid *, u_int, u_int, u_int);
 void	 grid_view_delete_lines_region(struct grid *, u_int, u_int, u_int,
 	     u_int);
 void	 grid_view_insert_cells(struct grid *, u_int, u_int, u_int, u_int);
+void	 grid_view_insert_cells_right(struct grid *, u_int, u_int, u_int, u_int,
+	     u_int);
 void	 grid_view_delete_cells(struct grid *, u_int, u_int, u_int, u_int);
+void	 grid_view_delete_cells_right(struct grid *, u_int, u_int, u_int, u_int,
+	     u_int, u_int);
 char	*grid_view_string_cells(struct grid *, u_int, u_int, u_int);
 
 /* screen-write.c */
