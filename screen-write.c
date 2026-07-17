@@ -1258,9 +1258,22 @@ screen_write_redraw_line(struct screen_write_ctx *ctx, struct tty_ctx *ttyctx,
 	struct screen		*s = ctx->s;
 	struct grid_cell	 gc, ngc;
 	u_int			 sx = screen_size_x(s), cx, i;
-	int			 xoff = wp->xoff, yoff = wp->yoff;
+	int			 xoff, yoff;
 	struct visible_ranges	*r;
 	struct visible_range	*ri;
+
+	/*
+	 * Without a pane (an overlay such as a popup) there is no window
+	 * geometry to redraw against; the grid is already updated, so request a
+	 * full redraw through the context callback instead.
+	 */
+	if (wp == NULL) {
+		if (ttyctx->redraw_cb != NULL)
+			ttyctx->redraw_cb(ttyctx, yy, 1);
+		return;
+	}
+	xoff = wp->xoff;
+	yoff = wp->yoff;
 
 	r = window_visible_ranges(wp, xoff, yoff + yy, sx, NULL);
 	for (i = 0; i < r->used; i++) {
@@ -1459,6 +1472,17 @@ screen_write_redraw_pane(struct screen_write_ctx *ctx, struct tty_ctx *ttyctx)
 {
 	struct screen	*s = ctx->s;
 	u_int		 yy;
+
+	/*
+	 * Without a pane (an overlay such as a popup) request a single full
+	 * redraw through the context callback rather than looping per line.
+	 */
+	if (ctx->wp == NULL) {
+		if (ttyctx->redraw_cb != NULL)
+			ttyctx->redraw_cb(ttyctx, 0,
+			    screen_size_y(s));
+		return;
+	}
 
 	for (yy = 0; yy < screen_size_y(s); yy++)
 		screen_write_redraw_line(ctx, ttyctx, yy);
