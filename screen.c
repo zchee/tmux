@@ -109,6 +109,9 @@ screen_reinit(struct screen *s)
 	s->rupper = 0;
 	s->rlower = screen_size_y(s) - 1;
 
+	s->rleft = 0;
+	s->rright = screen_size_x(s) - 1;
+
 	s->mode = MODE_CURSOR|MODE_WRAP|(s->mode & MODE_CRLF);
 
 	if (options_get_number(global_options, "extended-keys") == 2)
@@ -349,6 +352,10 @@ screen_resize_cursor(struct screen *s, u_int sx, u_int sy, int reflow,
 
 	if (sy != screen_size_y(s))
 		screen_resize_y(s, sy, eat_empty, &cy);
+
+	/* Reset the left and right margins (covers a width-only resize). */
+	s->rleft = 0;
+	s->rright = screen_size_x(s) - 1;
 
 	if (reflow)
 		screen_reflow(s, sx, &cx, &cy, cursor);
@@ -799,6 +806,8 @@ screen_mode_to_string(int mode)
 		strlcat(tmp, "RESIZE_REPORT,", sizeof tmp);
 	if (mode & MODE_GRAPHEME_CLUSTERS)
 		strlcat(tmp, "GRAPHEME_CLUSTERS,", sizeof tmp);
+	if (mode & MODE_LEFT_RIGHT_MARGIN)
+		strlcat(tmp, "LEFT_RIGHT_MARGIN,", sizeof tmp);
 	if (*tmp != '\0')
 		tmp[strlen(tmp) - 1] = '\0';
 	return (tmp);

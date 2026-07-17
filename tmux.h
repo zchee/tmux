@@ -711,6 +711,7 @@ enum tty_code_code {
 #define MODE_SYNC 0x100000
 #define MODE_RESIZE_REPORT 0x200000
 #define MODE_GRAPHEME_CLUSTERS 0x400000
+#define MODE_LEFT_RIGHT_MARGIN 0x800000
 
 #define ALL_MODES 0xffffff
 #define ALL_MOUSE_MODES (MODE_MOUSE_STANDARD|MODE_MOUSE_BUTTON|MODE_MOUSE_ALL)
@@ -1088,6 +1089,9 @@ struct screen {
 
 	u_int				 rupper;  /* scroll region top */
 	u_int				 rlower;  /* scroll region bottom */
+
+	u_int				 rleft;   /* left margin (DECSLRM) */
+	u_int				 rright;  /* right margin (DECSLRM) */
 
 	int				 mode;
 	int				 default_mode;
@@ -1913,6 +1917,8 @@ struct tty_ctx {
 
 	u_int			 orupper;
 	u_int			 orlower;
+	u_int			 orleft;
+	u_int			 orright;
 
 	/* Target region (usually pane) offset and size. */
 	int			 xoff;
@@ -3628,6 +3634,7 @@ void	 screen_write_clearstartofline(struct screen_write_ctx *, u_int);
 void	 screen_write_cursormove(struct screen_write_ctx *, int, int, int);
 void	 screen_write_reverseindex(struct screen_write_ctx *, u_int);
 void	 screen_write_scrollregion(struct screen_write_ctx *, u_int, u_int);
+void	 screen_write_setmargins(struct screen_write_ctx *, u_int, u_int);
 void	 screen_write_linefeed(struct screen_write_ctx *, int, u_int);
 void	 screen_write_scrollup(struct screen_write_ctx *, u_int, u_int);
 void	 screen_write_scrolldown(struct screen_write_ctx *, u_int, u_int);

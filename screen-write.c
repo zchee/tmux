@@ -61,6 +61,27 @@ struct screen_write_cline {
 TAILQ_HEAD(, screen_write_citem)  screen_write_citem_freelist =
     TAILQ_HEAD_INITIALIZER(screen_write_citem_freelist);
 
+/*
+ * Left and right margins. When left-right margin mode (DECLRMM, ?69) is not
+ * enabled these collapse to the full screen width, so the margin-aware paths
+ * behave exactly as before.
+ */
+static u_int
+screen_write_left(struct screen *s)
+{
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+		return (s->rleft);
+	return (0);
+}
+
+static u_int
+screen_write_right(struct screen *s)
+{
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+		return (s->rright);
+	return (screen_size_x(s) - 1);
+}
+
 static struct screen_write_citem *
 screen_write_get_citem(void)
 {
@@ -301,6 +322,8 @@ screen_write_initctx(struct screen_write_ctx *ctx, struct tty_ctx *ttyctx,
 	ttyctx->ocy = s->cy;
 	ttyctx->orlower = s->rlower;
 	ttyctx->orupper = s->rupper;
+	ttyctx->orleft = s->rleft;
+	ttyctx->orright = s->rright;
 
 	if (check_obscured && screen_write_pane_is_obscured(ctx))
 		ttyctx->flags |= TTY_CTX_PANE_OBSCURED;
@@ -455,6 +478,7 @@ screen_write_reset(struct screen_write_ctx *ctx)
 
 	screen_reset_tabs(s);
 	screen_write_scrollregion(ctx, 0, screen_size_y(s) - 1);
+	screen_write_setmargins(ctx, 0, screen_size_x(s) - 1);
 
 	s->mode = MODE_CURSOR|MODE_WRAP;
 
@@ -1173,13 +1197,21 @@ void
 screen_write_cursorright(struct screen_write_ctx *ctx, u_int nx)
 {
 	struct screen	*s = ctx->s;
-	u_int		 cx = s->cx, cy = s->cy;
+	u_int		 cx = s->cx, cy = s->cy, limit;
 
 	if (nx == 0)
 		nx = 1;
 
-	if (nx > screen_size_x(s) - 1 - cx)
-		nx = screen_size_x(s) - 1 - cx;
+	/*
+	 * Stop at the right margin if the cursor starts at or before it,
+	 * otherwise (already past the margin) at the right edge of the screen.
+	 */
+	limit = screen_write_right(s);
+	if (cx > limit)
+		limit = screen_size_x(s) - 1;
+
+	if (nx > limit - cx)
+		nx = limit - cx;
 	if (nx == 0)
 		return;
 
@@ -1193,13 +1225,21 @@ void
 screen_write_cursorleft(struct screen_write_ctx *ctx, u_int nx)
 {
 	struct screen	*s = ctx->s;
-	u_int		 cx = s->cx, cy = s->cy;
+	u_int		 cx = s->cx, cy = s->cy, limit;
 
 	if (nx == 0)
 		nx = 1;
 
-	if (nx > cx)
-		nx = cx;
+	/*
+	 * Stop at the left margin if the cursor starts at or after it,
+	 * otherwise (already before the margin) at the left edge of the screen.
+	 */
+	limit = screen_write_left(s);
+	if (cx < limit)
+		limit = 0;
+
+	if (nx > cx - limit)
+		nx = cx - limit;
 	if (nx == 0)
 		return;
 
@@ -1222,8 +1262,10 @@ screen_write_backspace(struct screen_write_ctx *ctx)
 		gl = grid_get_line(s->grid, s->grid->hsize + cy - 1);
 		if (gl->flags & GRID_LINE_WRAPPED) {
 			cy--;
-			cx = screen_size_x(s) - 1;
+			cx = screen_write_right(s);
 		}
+	} else if (cx == screen_write_left(s)) {
+		/* Do not move past the left margin. */
 	} else
 		cx--;
 
@@ -1514,6 +1556,9 @@ screen_write_alignmenttest(struct screen_write_ctx *ctx)
 	s->rupper = 0;
 	s->rlower = screen_size_y(s) - 1;
 
+	s->rleft = 0;
+	s->rright = screen_size_x(s) - 1;
+
 	screen_write_collect_clear(ctx, 0, screen_size_y(s) - 1);
 
 	screen_write_initctx(ctx, &ttyctx, 1, 1);
@@ -1552,6 +1597,26 @@ screen_write_insertcharacter(struct screen_write_ctx *ctx, u_int nx, u_int bg)
 #ifdef ENABLE_IMAGES
 	image_redraw_area(ctx, 0, s->cy, screen_size_x(s), 1);
 #endif
+
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	left = screen_write_left(s), right = screen_write_right(s);
+
+		if (s->cx < left || s->cx > right)
+			return;
+		if (nx > right - s->cx + 1)
+			nx = right - s->cx + 1;
+
+		grid_view_insert_cells_right(s->grid, s->cx, s->cy, nx, right, bg);
+
+		screen_write_collect_flush(ctx, 0, __func__);
+		ttyctx.n = nx;
+
+		if (!screen_write_should_draw_line(ctx, s->cy))
+			return;
+
+		screen_write_redraw_line(ctx, &ttyctx, s->cy);
+		return;
+	}
 
 	grid_view_insert_cells(s->grid, s->cx, s->cy, nx, bg);
 
@@ -1592,6 +1657,27 @@ screen_write_deletecharacter(struct screen_write_ctx *ctx, u_int nx, u_int bg)
 #ifdef ENABLE_IMAGES
 	image_redraw_area(ctx, 0, s->cy, screen_size_x(s), 1);
 #endif
+
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	left = screen_write_left(s), right = screen_write_right(s);
+
+		if (s->cx < left || s->cx > right)
+			return;
+		if (nx > right - s->cx + 1)
+			nx = right - s->cx + 1;
+
+		grid_view_delete_cells_right(s->grid, s->cx, s->cy, nx, left,
+		    right, bg);
+
+		screen_write_collect_flush(ctx, 0, __func__);
+		ttyctx.n = nx;
+
+		if (!screen_write_should_draw_line(ctx, s->cy))
+			return;
+
+		screen_write_redraw_line(ctx, &ttyctx, s->cy);
+		return;
+	}
 
 	grid_view_delete_cells(s->grid, s->cx, s->cy, nx, bg);
 
@@ -1661,6 +1747,15 @@ screen_write_insertline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 		ny = 1;
 
 	if (s->cy < s->rupper || s->cy > s->rlower) {
+		/*
+		 * With left-right margins active, IL only acts when the cursor
+		 * is inside the scroll region; outside it is a no-op (as in
+		 * xterm) rather than a full-width insert that would disturb
+		 * columns outside the margins.
+		 */
+		if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+			return;
+
 		if (ny > sy - s->cy)
 			ny = sy - s->cy;
 		if (ny == 0)
@@ -1702,6 +1797,26 @@ screen_write_insertline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 	    s->rlower + 1 - s->cy);
 #endif
 
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	left = screen_write_left(s), right = screen_write_right(s);
+
+		if (s->cx < left || s->cx > right)
+			return;
+
+		grid_view_scroll_pad_region(gd, s->cy, s->rlower, left, right, 0,
+		    ny, bg);
+
+		screen_write_collect_flush(ctx, 0, __func__);
+		ttyctx.n = ny;
+
+		if (!screen_write_should_draw_lines(ctx, s->cy,
+		    s->rlower + 1 - s->cy))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
+
 	if (s->cy < s->rupper || s->cy > s->rlower)
 		grid_view_insert_lines(gd, s->cy, ny, bg);
 	else
@@ -1733,6 +1848,15 @@ screen_write_deleteline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 		ny = 1;
 
 	if (s->cy < s->rupper || s->cy > s->rlower) {
+		/*
+		 * With left-right margins active, DL only acts when the cursor
+		 * is inside the scroll region; outside it is a no-op (as in
+		 * xterm) rather than a full-width delete that would disturb
+		 * columns outside the margins.
+		 */
+		if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+			return;
+
 		if (ny > sy - s->cy)
 			ny = sy - s->cy;
 		if (ny == 0)
@@ -1774,6 +1898,25 @@ screen_write_deleteline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 #ifdef ENABLE_IMAGES
 	image_redraw_area(ctx, 0, s->cy, screen_size_x(s), ry);
 #endif
+
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	left = screen_write_left(s), right = screen_write_right(s);
+
+		if (s->cx < left || s->cx > right)
+			return;
+
+		grid_view_scroll_pad_region(gd, s->cy, s->rlower, left, right, 1,
+		    ny, bg);
+
+		screen_write_collect_flush(ctx, 0, __func__);
+		ttyctx.n = ny;
+
+		if (!screen_write_should_draw_lines(ctx, s->cy, ry))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
 
 	if (s->cy < s->rupper || s->cy > s->rlower)
 		grid_view_delete_lines(gd, s->cy, ny, bg);
@@ -1917,6 +2060,19 @@ screen_write_cursormove(struct screen_write_ctx *ctx, int px, int py,
 			py += s->rupper;
 	}
 
+	/*
+	 * Under origin mode with left-right margins, the column is relative to
+	 * the left margin and clamped to the right margin (mirrors the row
+	 * handling above).
+	 */
+	if (origin && px != -1 && (s->mode & MODE_ORIGIN) &&
+	    (s->mode & MODE_LEFT_RIGHT_MARGIN)) {
+		if ((u_int)px > s->rright - s->rleft)
+			px = s->rright;
+		else
+			px += s->rleft;
+	}
+
 	if (px != -1 && (u_int)px > screen_size_x(s) - 1)
 		px = screen_size_x(s) - 1;
 	if (py != -1 && (u_int)py > screen_size_y(s) - 1)
@@ -1943,6 +2099,23 @@ screen_write_reverseindex(struct screen_write_ctx *ctx, u_int bg)
 #ifdef ENABLE_IMAGES
 	image_redraw_scroll(ctx);
 #endif
+
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		screen_write_collect_flush(ctx, 0, __func__);
+
+		grid_view_scroll_pad_region(s->grid, s->rupper, s->rlower,
+		    screen_write_left(s), screen_write_right(s), 0, 1, bg);
+
+		screen_write_initctx(ctx, &ttyctx, 1, 1);
+		ttyctx.bg = bg;
+
+		ry = s->rlower + 1 - s->rupper;
+		if (!screen_write_should_draw_lines(ctx, s->rupper, ry))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
 
 	grid_view_scroll_region_down(s->grid, s->rupper, s->rlower, bg);
 	screen_write_collect_flush(ctx, 0, __func__);
@@ -1984,6 +2157,37 @@ screen_write_scrollregion(struct screen_write_ctx *ctx, u_int rupper,
 	s->rlower = rlower;
 }
 
+/* Set left and right margins (DECSLRM). */
+void
+screen_write_setmargins(struct screen_write_ctx *ctx, u_int rleft, u_int rright)
+{
+	struct screen	*s = ctx->s;
+
+	if (rleft > screen_size_x(s) - 1)
+		rleft = screen_size_x(s) - 1;
+	if (rright > screen_size_x(s) - 1)
+		rright = screen_size_x(s) - 1;
+	if (rleft >= rright)	/* cannot be one column */
+		return;
+
+	screen_write_collect_flush(ctx, 0, __func__);
+
+	s->rleft = rleft;
+	s->rright = rright;
+
+	log_debug("%s: margins now %u-%u", __func__, rleft, rright);
+
+	/*
+	 * The cursor moves to the home position, which is the top-left of the
+	 * scroll region under origin mode and the top-left of the screen
+	 * otherwise (mirrors DECSTBM).
+	 */
+	if (s->mode & MODE_ORIGIN)
+		screen_write_set_cursor(ctx, rleft, s->rupper);
+	else
+		screen_write_set_cursor(ctx, 0, 0);
+}
+
 /* Line feed. */
 void
 screen_write_linefeed(struct screen_write_ctx *ctx, int wrapped, u_int bg)
@@ -1991,6 +2195,7 @@ screen_write_linefeed(struct screen_write_ctx *ctx, int wrapped, u_int bg)
 	struct screen		*s = ctx->s;
 	struct grid		*gd = s->grid;
 	struct grid_line	*gl;
+	struct tty_ctx		 ttyctx;
 	u_int			 rupper = s->rupper, rlower = s->rlower;
 
 	gl = grid_get_line(gd, gd->hsize + s->cy);
@@ -2015,6 +2220,25 @@ screen_write_linefeed(struct screen_write_ctx *ctx, int wrapped, u_int bg)
 	image_redraw_scroll(ctx);
 #endif
 
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	ry;
+
+		screen_write_collect_flush(ctx, 0, __func__);
+
+		grid_view_scroll_pad_region(gd, s->rupper, s->rlower,
+		    screen_write_left(s), screen_write_right(s), 1, 1, bg);
+
+		screen_write_initctx(ctx, &ttyctx, 1, 1);
+		ttyctx.bg = bg;
+
+		ry = s->rlower + 1 - s->rupper;
+		if (!screen_write_should_draw_lines(ctx, s->rupper, ry))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
+
 	grid_view_scroll_region_up(gd, s->rupper, s->rlower, bg);
 	screen_write_collect_scroll(ctx, bg);
 	ctx->scrolled++;
@@ -2026,6 +2250,7 @@ screen_write_scrollup(struct screen_write_ctx *ctx, u_int lines, u_int bg)
 {
 	struct screen	*s = ctx->s;
 	struct grid	*gd = s->grid;
+	struct tty_ctx	 ttyctx;
 	u_int		 i;
 
 	if (lines == 0)
@@ -2041,6 +2266,25 @@ screen_write_scrollup(struct screen_write_ctx *ctx, u_int lines, u_int bg)
 #ifdef ENABLE_IMAGES
 	image_redraw_scroll(ctx);
 #endif
+
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		u_int	ry;
+
+		screen_write_collect_flush(ctx, 0, __func__);
+
+		grid_view_scroll_pad_region(gd, s->rupper, s->rlower,
+		    screen_write_left(s), screen_write_right(s), 1, lines, bg);
+
+		screen_write_initctx(ctx, &ttyctx, 1, 1);
+		ttyctx.bg = bg;
+
+		ry = s->rlower + 1 - s->rupper;
+		if (!screen_write_should_draw_lines(ctx, s->rupper, ry))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
 
 	for (i = 0; i < lines; i++) {
 		grid_view_scroll_region_up(gd, s->rupper, s->rlower, bg);
@@ -2070,6 +2314,21 @@ screen_write_scrolldown(struct screen_write_ctx *ctx, u_int lines, u_int bg)
 	image_redraw_scroll(ctx);
 #endif
 
+	if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+		grid_view_scroll_pad_region(gd, s->rupper, s->rlower,
+		    screen_write_left(s), screen_write_right(s), 0, lines, bg);
+
+		screen_write_collect_flush(ctx, 0, __func__);
+		ttyctx.n = lines;
+
+		ry = s->rlower + 1 - s->rupper;
+		if (!screen_write_should_draw_lines(ctx, s->rupper, ry))
+			return;
+
+		screen_write_redraw_pane(ctx, &ttyctx);
+		return;
+	}
+
 	for (i = 0; i < lines; i++)
 		grid_view_scroll_region_down(gd, s->rupper, s->rlower, bg);
 
@@ -2091,7 +2350,17 @@ screen_write_scrolldown(struct screen_write_ctx *ctx, u_int lines, u_int bg)
 void
 screen_write_carriagereturn(struct screen_write_ctx *ctx)
 {
-	screen_write_set_cursor(ctx, 0, -1);
+	struct screen	*s = ctx->s;
+	u_int		 cx = 0;
+
+	/*
+	 * Return to the left margin, unless the cursor is already to the left
+	 * of it, in which case return to the left edge of the screen.
+	 */
+	if (s->cx >= screen_write_left(s))
+		cx = screen_write_left(s);
+
+	screen_write_set_cursor(ctx, cx, -1);
 }
 
 /* Clear to end of screen from cursor. */
@@ -2827,6 +3096,8 @@ screen_write_collect_add(struct screen_write_ctx *ctx,
 		collect = 0;
 	else if (s->mode & MODE_INSERT)
 		collect = 0;
+	else if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+		collect = 0;
 	else if (s->sel != NULL)
 		collect = 0;
 	if (!collect) {
@@ -2868,6 +3139,7 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 	struct tty_ctx		 ttyctx;
 	u_int			 sx = screen_size_x(s), sy = screen_size_y(s);
 	u_int			 width = ud->width, xx, not_wrap, i, n, vis;
+	u_int			 mlx, rx;
 	int			 selected, skip = 1, redraw = 0;
 	int			 yoff = 0, xoff = 0;
 	struct visible_ranges	*r;
@@ -2876,6 +3148,15 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 	/* Ignore padding cells. */
 	if (gc->flags & GRID_FLAG_PADDING)
 		return;
+
+	/*
+	 * Effective horizontal bounds. Without left-right margin mode these are
+	 * the left edge and the screen width, so the wrap and advance logic is
+	 * unchanged; with margins active rx is one past the right margin and mlx
+	 * is the left margin.
+	 */
+	mlx = screen_write_left(s);
+	rx = screen_write_right(s) + 1;
 
 	/* Get the previous cell to check for combining. */
 	if (screen_write_combine(ctx, gc) != 0)
@@ -2896,11 +3177,18 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 		skip = 0;
 	}
 
-	/* Check this will fit on the current line and wrap if not. */
-	if ((s->mode & MODE_WRAP) && s->cx > sx - width) {
+	/*
+	 * Check this will fit on the current line and wrap if not. With
+	 * left-right margins the wrap happens at the right margin and returns
+	 * to the left margin; rx == sx and mlx == 0 without margins so this is
+	 * the original behaviour. Only wrap when the cursor is within the
+	 * margins, matching the region the right margin governs.
+	 */
+	if ((s->mode & MODE_WRAP) && s->cx >= mlx && rx >= width &&
+	    s->cx > rx - width) {
 		log_debug("%s: wrapped at %u,%u", __func__, s->cx, s->cy);
 		screen_write_linefeed(ctx, 1, 8);
-		screen_write_set_cursor(ctx, 0, -1);
+		screen_write_set_cursor(ctx, mlx, -1);
 		screen_write_collect_flush(ctx, 0, __func__);
 	}
 
@@ -2986,10 +3274,12 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 	 * replace it.
 	 */
 	not_wrap = !(s->mode & MODE_WRAP);
-	if (s->cx <= sx - not_wrap - width)
+	if (s->cx >= mlx && s->cx <= rx - not_wrap - width)
+		screen_write_set_cursor(ctx, s->cx + width, -1);
+	else if (s->cx < mlx)
 		screen_write_set_cursor(ctx, s->cx + width, -1);
 	else
-		screen_write_set_cursor(ctx, sx - not_wrap, -1);
+		screen_write_set_cursor(ctx, rx - not_wrap, -1);
 
 	/* Create space for character in insert mode. */
 	if (s->mode & MODE_INSERT) {

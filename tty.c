@@ -1602,6 +1602,7 @@ void
 tty_cmd_insertline(struct tty *tty, const struct tty_ctx *ctx)
 {
 	if ((ctx->flags & TTY_CTX_WINDOW_BIGGER) ||
+	    ctx->orleft != 0 || ctx->orright != ctx->sx - 1 ||
 	    !tty_full_width(tty, ctx) ||
 	    tty_fake_bce(tty, &ctx->defaults, ctx->bg) ||
 	    !tty_term_has(tty->term, TTYC_CSR) ||
@@ -1626,6 +1627,7 @@ void
 tty_cmd_deleteline(struct tty *tty, const struct tty_ctx *ctx)
 {
 	if ((ctx->flags & TTY_CTX_WINDOW_BIGGER) ||
+	    ctx->orleft != 0 || ctx->orright != ctx->sx - 1 ||
 	    !tty_full_width(tty, ctx) ||
 	    tty_fake_bce(tty, &ctx->defaults, ctx->bg) ||
 	    !tty_term_has(tty->term, TTYC_CSR) ||
@@ -1711,6 +1713,7 @@ tty_cmd_linefeed(struct tty *tty, const struct tty_ctx *ctx)
 		return;
 
 	if ((ctx->flags & TTY_CTX_WINDOW_BIGGER) ||
+	    ctx->orleft != 0 || ctx->orright != ctx->sx - 1 ||
 	    (!tty_full_width(tty, ctx) && !tty_use_margin(tty)) ||
 	    tty_fake_bce(tty, &ctx->defaults, 8) ||
 	    !tty_term_has(tty->term, TTYC_CSR) ||
@@ -1751,6 +1754,7 @@ tty_cmd_scrollup(struct tty *tty, const struct tty_ctx *ctx)
 	u_int			 i;
 
 	if ((ctx->flags & TTY_CTX_WINDOW_BIGGER) ||
+	    ctx->orleft != 0 || ctx->orright != ctx->sx - 1 ||
 	    (!tty_full_width(tty, ctx) && !tty_use_margin(tty)) ||
 	    tty_fake_bce(tty, &ctx->defaults, 8) ||
 	    !tty_term_has(tty->term, TTYC_CSR) ||
