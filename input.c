@@ -1309,7 +1309,7 @@ input_c0_dispatch(struct input_ctx *ictx)
 	struct window_pane	*wp = ictx->wp;
 	struct screen		*s = sctx->s;
 	struct grid_cell	 gc, first_gc;
-	u_int			 cx, line;
+	u_int			 cx, line, tabstop;
 	u_int			 width;
 	int			 has_content = 0;
 
@@ -1330,9 +1330,16 @@ input_c0_dispatch(struct input_ctx *ictx)
 		screen_write_backspace(sctx);
 		break;
 	case '\011':	/* HT */
-		/* Don't tab beyond the end of the line. */
+		/*
+		 * Don't tab beyond the end of the line, or beyond the right
+		 * margin when left-right margin mode is active.
+		 */
 		cx = s->cx;
-		if (cx >= screen_size_x(s) - 1)
+		if (s->mode & MODE_LEFT_RIGHT_MARGIN)
+			tabstop = s->rright;
+		else
+			tabstop = screen_size_x(s) - 1;
+		if (cx >= tabstop)
 			break;
 
 		/* Find the next tab point, or use the last column if none. */
@@ -1349,7 +1356,7 @@ input_c0_dispatch(struct input_ctx *ictx)
 			cx++;
 			if (bit_test(s->tabs, cx))
 				break;
-		} while (cx < screen_size_x(s) - 1);
+		} while (cx < tabstop);
 
 		width = cx - s->cx;
 		if (has_content || width > sizeof gc.data.data)
@@ -1470,7 +1477,7 @@ input_csi_dispatch(struct input_ctx *ictx)
 	const struct input_table_entry	*entry;
 	struct options			*oo;
 	int				 i, n, m, ek, set, p;
-	u_int				 cx, bg = ictx->cell.cell.bg;
+	u_int				 cx, cbtfloor, bg = ictx->cell.cell.bg;
 
 	if (ictx->flags & INPUT_DISCARD)
 		return (0);
@@ -1494,13 +1501,21 @@ input_csi_dispatch(struct input_ctx *ictx)
 		cx = s->cx;
 		if (cx > screen_size_x(s) - 1)
 			cx = screen_size_x(s) - 1;
+		/*
+		 * Do not tab back past the left margin when left-right margin
+		 * mode is active and the cursor starts at or after it.
+		 */
+		if ((s->mode & MODE_LEFT_RIGHT_MARGIN) && cx >= s->rleft)
+			cbtfloor = s->rleft;
+		else
+			cbtfloor = 0;
 		n = input_get(ictx, 0, 1, 1);
 		if (n == -1)
 			break;
-		while (cx > 0 && n-- > 0) {
+		while (cx > cbtfloor && n-- > 0) {
 			do
 				cx--;
-			while (cx > 0 && !bit_test(s->tabs, cx));
+			while (cx > cbtfloor && !bit_test(s->tabs, cx));
 		}
 		s->cx = cx;
 		break;
@@ -1682,6 +1697,9 @@ input_csi_dispatch(struct input_ctx *ictx)
 		case 25:	/* DECTCEM */
 			n = (s->mode & MODE_CURSOR) ? 1 : 2;
 			break;
+		case 69:	/* DECLRMM: left/right margin mode */
+			n = (s->mode & MODE_LEFT_RIGHT_MARGIN) ? 1 : 2;
+			break;
 		case 47:
 		case 1047:
 		case 1049:	/* alternate screen */
@@ -1834,7 +1852,19 @@ input_csi_dispatch(struct input_ctx *ictx)
 		input_csi_dispatch_rm_private(ictx);
 		break;
 	case INPUT_CSI_SCP:
-		input_save_state(ictx);
+		/*
+		 * CSI s is DECSLRM (set left and right margins) when the
+		 * left-right margin mode (DECLRMM, ?69) is enabled and SCP
+		 * (save cursor) otherwise. xterm disambiguates purely on the
+		 * mode, never on the number of parameters.
+		 */
+		if (s->mode & MODE_LEFT_RIGHT_MARGIN) {
+			n = input_get(ictx, 0, 1, 1);
+			m = input_get(ictx, 1, 1, screen_size_x(s));
+			if (n != -1 && m != -1)
+				screen_write_setmargins(sctx, n - 1, m - 1);
+		} else
+			input_save_state(ictx);
 		break;
 	case INPUT_CSI_SGR:
 		input_csi_dispatch_sgr(ictx);
@@ -1932,6 +1962,7 @@ static void
 input_csi_dispatch_rm_private(struct input_ctx *ictx)
 {
 	struct screen_write_ctx	*sctx = &ictx->ctx;
+	struct screen		*s = sctx->s;
 	struct grid_cell	*gc = &ictx->cell.cell;
 	u_int			 i;
 
@@ -1943,6 +1974,7 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 			screen_write_mode_clear(sctx, MODE_KCURSOR);
 			break;
 		case 3:		/* DECCOLM */
+			screen_write_setmargins(sctx, 0, screen_size_x(s) - 1);
 			screen_write_cursormove(sctx, 0, 0, 1);
 			screen_write_clearscreen(sctx, gc->bg);
 			break;
@@ -1959,6 +1991,15 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 			break;
 		case 25:	/* TCEM */
 			screen_write_mode_clear(sctx, MODE_CURSOR);
+			break;
+		case 69:	/* DECLRMM: left/right margin mode */
+			screen_write_mode_clear(sctx, MODE_LEFT_RIGHT_MARGIN);
+			/*
+			 * Resetting the mode also resets the margins, but unlike
+			 * DECSLRM it must not move the cursor.
+			 */
+			s->rleft = 0;
+			s->rright = screen_size_x(s) - 1;
 			break;
 		case 1000:
 		case 1001:
@@ -2035,6 +2076,7 @@ static void
 input_csi_dispatch_sm_private(struct input_ctx *ictx)
 {
 	struct screen_write_ctx	*sctx = &ictx->ctx;
+	struct screen		*s = sctx->s;
 	struct window_pane	*wp = ictx->wp;
 	struct grid_cell	*gc = &ictx->cell.cell;
 	u_int			 i;
@@ -2047,6 +2089,7 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 			screen_write_mode_set(sctx, MODE_KCURSOR);
 			break;
 		case 3:		/* DECCOLM */
+			screen_write_setmargins(sctx, 0, screen_size_x(s) - 1);
 			screen_write_cursormove(sctx, 0, 0, 1);
 			screen_write_clearscreen(sctx, ictx->cell.cell.bg);
 			break;
@@ -2063,6 +2106,9 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 			break;
 		case 25:	/* TCEM */
 			screen_write_mode_set(sctx, MODE_CURSOR);
+			break;
+		case 69:	/* DECLRMM: left/right margin mode */
+			screen_write_mode_set(sctx, MODE_LEFT_RIGHT_MARGIN);
 			break;
 		case 1000:
 			screen_write_mode_clear(sctx, ALL_MOUSE_MODES);
