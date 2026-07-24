@@ -18,6 +18,7 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/uio.h>
 
 #include <errno.h>
@@ -49,6 +50,7 @@ static int	server_client_handle_dead_key(struct window_pane *, key_code);
 static void	server_client_dispatch(struct imsg *, void *);
 static int	server_client_dispatch_command(struct client *, struct imsg *);
 static int	server_client_dispatch_identify(struct client *, struct imsg *);
+static void	server_client_arm_kittyoob(struct client *);
 static int	server_client_dispatch_shell(struct client *);
 static void	server_client_report_theme(struct client *, enum client_theme);
 
@@ -175,6 +177,7 @@ server_client_create(int fd)
 
 	c->fd = -1;
 	c->out_fd = -1;
+	c->oob_fd = -1;
 
 	c->queue = cmdq_new();
 	RB_INIT(&c->files);
@@ -441,6 +444,11 @@ server_client_lost(struct client *c)
 	proc_remove_peer(c->peer);
 	c->peer = NULL;
 
+	if (c->oob_fd != -1) {
+		close(c->oob_fd);
+		c->oob_fd = -1;
+		c->oob_armed = 0;
+	}
 	if (c->out_fd != -1)
 		close(c->out_fd);
 	if (c->fd != -1) {
@@ -2584,6 +2592,7 @@ server_client_dispatch(struct imsg *imsg, void *arg)
 	case MSG_IDENTIFY_LONGFLAGS:
 	case MSG_IDENTIFY_STDIN:
 	case MSG_IDENTIFY_STDOUT:
+	case MSG_IDENTIFY_KITTYOOB:
 	case MSG_IDENTIFY_TERM:
 	case MSG_IDENTIFY_TERMINFO:
 	case MSG_IDENTIFY_TTYNAME:
@@ -2786,6 +2795,44 @@ error:
 }
 
 /* Handle identify message. */
+/*
+ * R3T M0: arm the kitty OOB bulk channel for a terminal client. The
+ * 10-byte KOOB1 handshake must be the first bytes on the socket and must
+ * complete before any tty output exists, so that while armed the ENTIRE
+ * output stream rides the channel (single-stream ordering) and the pty
+ * carries only input/signals/winsize.
+ */
+static void
+server_client_arm_kittyoob(struct client *c)
+{
+	static const char	 hs[10] = { 'K', 'O', 'O', 'B', '1', '\n',
+				     0, 0, 0, 0 };
+	int			 type;
+	socklen_t		 typelen = sizeof type;
+
+	if (c->oob_fd == -1)
+		return;
+	if (getsockopt(c->oob_fd, SOL_SOCKET, SO_TYPE, &type, &typelen) != 0 ||
+	    type != SOCK_STREAM) {
+		log_debug("client %p KITTYOOB fd %d is not a stream socket",
+		    c, c->oob_fd);
+		goto fail;
+	}
+	if (write(c->oob_fd, hs, sizeof hs) != sizeof hs) {
+		log_debug("client %p KITTYOOB handshake failed: %s", c,
+		    strerror(errno));
+		goto fail;
+	}
+	setblocking(c->oob_fd, 0);
+	c->oob_armed = 1;
+	log_debug("client %p KITTYOOB armed on fd %d", c, c->oob_fd);
+	return;
+
+fail:
+	close(c->oob_fd);
+	c->oob_fd = -1;
+}
+
 static int
 server_client_dispatch_identify(struct client *c, struct imsg *imsg)
 {
@@ -2868,6 +2915,12 @@ server_client_dispatch_identify(struct client *c, struct imsg *imsg)
 		c->out_fd = imsg_get_fd(imsg);
 		log_debug("client %p IDENTIFY_STDOUT %d", c, c->out_fd);
 		break;
+	case MSG_IDENTIFY_KITTYOOB:
+		if (datalen != 0)
+			return (-1);
+		c->oob_fd = imsg_get_fd(imsg);
+		log_debug("client %p IDENTIFY_KITTYOOB %d", c, c->oob_fd);
+		break;
 	case MSG_IDENTIFY_ENVIRON:
 		if (datalen == 0 || data[datalen - 1] != '\0')
 			return (-1);
@@ -2915,10 +2968,16 @@ server_client_dispatch_identify(struct client *c, struct imsg *imsg)
 		} else {
 			tty_resize(&c->tty);
 			c->flags |= CLIENT_TERMINAL;
+			server_client_arm_kittyoob(c);
 		}
 		if (c->out_fd != -1)
 			close(c->out_fd);
 		c->out_fd = -1;
+	}
+	/* R3T M0: control clients and failed tty inits never arm. */
+	if (c->oob_fd != -1 && !c->oob_armed) {
+		close(c->oob_fd);
+		c->oob_fd = -1;
 	}
 	if (c->flags & (CLIENT_CONTROL|CLIENT_TERMINAL))
 		events_fire_client("client-created", c);

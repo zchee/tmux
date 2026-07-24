@@ -177,10 +177,11 @@ int
 server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
     int lockfd, char *lockfile)
 {
-	int		 fd;
+	int		 fd, oobfd;
 	sigset_t	 set, oldset;
 	struct client	*c = NULL;
 	char		*cause = NULL;
+	const char	*oobenv, *errstr;
 	struct timeval	 tv = { .tv_sec = 3600 };
 
 	sigfillset(&set);
@@ -194,6 +195,25 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	}
 	proc_clear_signals(client, 0);
 	server_client_flags = flags;
+
+	/*
+	 * R3T M0: the daemon inherited the first client's environment and
+	 * descriptors. Drop any kitty OOB channel copy so the server never
+	 * holds an orphaned channel (it pins kitty's reader thread) and no
+	 * pane inherits the gate variables. The usable channel fd arrives
+	 * per-client via MSG_IDENTIFY_KITTYOOB instead.
+	 */
+	if ((oobenv = getenv("KITTY_TUI_OOB_FD")) != NULL) {
+		oobfd = strtonum(oobenv, 0, 0x7fffffff, &errstr);
+		if (errstr == NULL)
+			close(oobfd);
+		unsetenv("KITTY_TUI_OOB_FD");
+	}
+	unsetenv("KITTY_ENABLE_TUI_OOB");
+	/* global_environ was captured in main() before the fork; scrub the
+	 * struct too or every pane inherits the booby-trap variables. */
+	environ_unset(global_environ, "KITTY_TUI_OOB_FD");
+	environ_unset(global_environ, "KITTY_ENABLE_TUI_OOB");
 
 	if (event_reinit(base) != 0)
 		fatalx("event_reinit failed");

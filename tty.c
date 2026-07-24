@@ -248,6 +248,36 @@ tty_block_maybe(struct tty *tty)
 	return (1);
 }
 
+/*
+ * R3T M0: while the kitty OOB channel is armed, every output byte goes
+ * through it and the pty carries no output at all (single-stream ordering;
+ * kitty drains the channel into the same parse arena as the pty).
+ */
+static int
+tty_out_fd(struct tty *tty)
+{
+	struct client	*c = tty->client;
+
+	if (c->oob_armed && c->oob_fd != -1)
+		return (c->oob_fd);
+	return (c->fd);
+}
+
+/* R3T M0 sticky fail-open: the channel died; fall back to the tty for
+ * good. Unwritten bytes stay buffered, so output resumes on c->fd at the
+ * exact unwritten offset. Never re-arms. */
+static void
+tty_oob_failopen(struct tty *tty)
+{
+	struct client	*c = tty->client;
+
+	log_debug("%s: kitty OOB channel failed (%s), falling back to tty",
+	    c->name, strerror(errno));
+	close(c->oob_fd);
+	c->oob_fd = -1;
+	c->oob_armed = 0;
+}
+
 static void
 tty_write_callback(__unused int fd, __unused short events, void *data)
 {
@@ -256,9 +286,15 @@ tty_write_callback(__unused int fd, __unused short events, void *data)
 	size_t		 size = EVBUFFER_LENGTH(tty->out);
 	int		 nwrite;
 
-	nwrite = evbuffer_write(tty->out, c->fd);
-	if (nwrite == -1)
+	nwrite = evbuffer_write(tty->out, tty_out_fd(tty));
+	if (nwrite == -1) {
+		if (c->oob_armed && errno != EAGAIN && errno != EINTR) {
+			tty_oob_failopen(tty);
+			if (EVBUFFER_LENGTH(tty->out) != 0)
+				event_add(&tty->event_out, NULL);
+		}
 		return;
+	}
 	log_debug("%s: wrote %d bytes (of %zu)", c->name, nwrite, size);
 
 	if (c->redraw > 0) {
@@ -598,14 +634,20 @@ tty_raw(struct tty *tty, const char *s)
 
 	slen = strlen(s);
 	for (i = 0; i < 5; i++) {
-		n = write(c->fd, s, slen);
+		n = write(tty_out_fd(tty), s, slen);
 		if (n >= 0) {
 			s += n;
 			slen -= n;
 			if (slen == 0)
 				break;
-		} else if (n == -1 && errno != EAGAIN)
+		} else if (n == -1 && errno != EAGAIN) {
+			if (c->oob_armed) {
+				/* R3T M0: fail open and retry on the tty. */
+				tty_oob_failopen(tty);
+				continue;
+			}
 			break;
+		}
 		usleep(100);
 	}
 }

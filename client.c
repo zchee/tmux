@@ -445,10 +445,11 @@ client_send_identify(const char *ttynam, const char *termname, char **caps,
 {
 	char	**ss;
 	size_t	  sslen;
-	int	  fd;
+	int	  fd, oobfd;
 	uint64_t  flags = client_flags;
 	pid_t	  pid;
 	u_int	  i;
+	const char *oobenv, *errstr;
 
 	proc_send(client_peer, MSG_IDENTIFY_LONGFLAGS, -1, &flags, sizeof flags);
 	proc_send(client_peer, MSG_IDENTIFY_LONGFLAGS, -1, &client_flags,
@@ -473,6 +474,23 @@ client_send_identify(const char *ttynam, const char *termname, char **caps,
 	if ((fd = dup(STDOUT_FILENO)) == -1)
 		fatal("dup failed");
 	proc_send(client_peer, MSG_IDENTIFY_STDOUT, fd, NULL, 0);
+
+	/*
+	 * R3T M0: hand the kitty OOB channel fd to the server (the process
+	 * that writes this client's tty), then scrub both gate variables
+	 * BEFORE the environ loop below so neither the session environment
+	 * nor any pane ever sees the booby-trap variable.
+	 */
+	if ((oobenv = getenv("KITTY_TUI_OOB_FD")) != NULL) {
+		oobfd = strtonum(oobenv, 0, 0x7fffffff, &errstr);
+		if (errstr == NULL && (fd = dup(oobfd)) != -1) {
+			proc_send(client_peer, MSG_IDENTIFY_KITTYOOB, fd,
+			    NULL, 0);
+			close(oobfd);
+		}
+		unsetenv("KITTY_TUI_OOB_FD");
+	}
+	unsetenv("KITTY_ENABLE_TUI_OOB");
 
 	pid = getpid();
 	proc_send(client_peer, MSG_IDENTIFY_CLIENTPID, -1, &pid, sizeof pid);

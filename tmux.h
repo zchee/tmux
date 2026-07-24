@@ -2235,6 +2235,9 @@ struct client {
 	pid_t			 pid;
 	int			 fd;
 	int			 out_fd;
+	/* R3T M0: kitty OOB bulk channel (opt-in, terminal clients only). */
+	int			 oob_fd;
+	int			 oob_armed;
 	struct event		 event;
 	int			 retval;
 
