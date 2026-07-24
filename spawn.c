@@ -17,9 +17,11 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -253,6 +255,7 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	char			**argv, *cp, **argvp, *argv0, *cwd, *new_cwd;
 	char			  path[PATH_MAX];
 	const char		 *cmd, *tmp, *home = find_home();
+	int			  oob_pair[2] = { -1, -1 };
 	const char		 *actual_cwd = NULL;
 	int			  argc;
 	u_int			  idx;
@@ -479,11 +482,32 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	else if (chdir("/") == 0)
 		actual_cwd = "/";
 
+	/*
+	 * R3T M2: offer the pane a kitty OOB bulk channel. The child end is
+	 * dup2'd to fd 3 between fork and closefrom, so TMUX_TUI_OOB_FD can
+	 * be a static "3". A pane that never handshakes costs one idle
+	 * socketpair; a respawn drops any previous channel first.
+	 */
+	if (new_wp->oob_fd != -1) {
+		close(new_wp->oob_fd);
+		new_wp->oob_fd = -1;
+	}
+	if (options_get_number(global_options, "kitty-oob-pane")) {
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, oob_pair) != 0)
+			oob_pair[0] = oob_pair[1] = -1;
+		else
+			environ_set(child, "TMUX_TUI_OOB_FD", 0, "3");
+	}
+
 	/* Fork the new process. */
 	new_wp->pid = fdforkpty(ptm_fd, &new_wp->fd, new_wp->tty, NULL, &ws);
 	if (new_wp->pid == -1) {
 		xasprintf(cause, "fork failed: %s", strerror(errno));
 		new_wp->fd = -1;
+		if (oob_pair[0] != -1) {
+			close(oob_pair[0]);
+			close(oob_pair[1]);
+		}
 		if (~sc->flags & SPAWN_RESPAWN) {
 			server_client_remove_pane(new_wp);
 			layout_close_pane(new_wp);
@@ -499,6 +523,12 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	 * directory back.
 	 */
 	if (new_wp->pid != 0) {
+		if (oob_pair[1] != -1)
+			close(oob_pair[1]);
+		if (oob_pair[0] != -1) {
+			fcntl(oob_pair[0], F_SETFD, FD_CLOEXEC);
+			new_wp->oob_fd = oob_pair[0];
+		}
 		if (actual_cwd != NULL &&
 		    chdir(path) != 0 &&
 		    (home == NULL || chdir(home) != 0))
@@ -542,8 +572,10 @@ spawn_pane(struct spawn_context *sc, char **cause)
 		_exit(1);
 
 	/* Clean up file descriptors and signals and update the environment. */
+	if (oob_pair[1] != -1 && dup2(oob_pair[1], 3) == -1)
+		_exit(1);
 	proc_clear_signals(server_proc, 1);
-	closefrom(STDERR_FILENO + 1);
+	closefrom(oob_pair[1] != -1 ? 4 : STDERR_FILENO + 1);
 	sigprocmask(SIG_SETMASK, &oldset, NULL);
 	log_close();
 	environ_push(child);

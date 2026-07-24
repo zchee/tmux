@@ -469,6 +469,16 @@ const struct options_table_entry options_table[] = {
 		  "opt-in on the kitty side."
 	},
 
+	{ .name = "kitty-oob-pane",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 1,
+	  .text = "Whether to offer new panes an out-of-band bulk channel "
+		  "(TMUX_TUI_OOB_FD) that cooperating programs may use "
+		  "instead of the pane tty for bulk output. Independent of "
+		  "kitty-oob so each hop can be toggled alone."
+	},
+
 	{ .name = "input-buffer-size",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SERVER,

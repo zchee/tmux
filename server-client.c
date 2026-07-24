@@ -2009,10 +2009,7 @@ out:
 	 * accept any more data.
 	 */
 	log_debug("%s: pane %%%u is %s", __func__, wp->id, off ? "off" : "on");
-	if (off)
-		bufferevent_disable(wp->event, EV_READ);
-	else
-		bufferevent_enable(wp->event, EV_READ);
+	window_pane_set_read(wp, !off);
 }
 
 /* Move cursor for pane prompt. */

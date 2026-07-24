@@ -1400,6 +1400,15 @@ struct window_pane {
 	struct style_line_entry border_status_line;
 
 	int		 pipe_fd;
+	/* R3T M2: kitty OOB bulk channel offered to the pane child. */
+	int		 oob_fd;
+	struct bufferevent *oob_event;
+	size_t		 oob_hs;	/* handshake bytes still expected */
+	u_char		 oob_hsbuf[10];
+	int		 oob_broken;
+	u_int		 oob_reads;
+	uint64_t	 oob_bytes;
+	u_int		 pty_reads;
 	pid_t		 pipe_pid;
 	struct bufferevent *pipe_event;
 	struct window_pane_offset pipe_offset;
@@ -3737,6 +3746,7 @@ struct window	*window_find_by_id(u_int);
 void		 window_update_activity(struct window *);
 struct window	*window_create(u_int, u_int, u_int, u_int);
 void		 window_pane_set_event(struct window_pane *);
+void		 window_pane_set_read(struct window_pane *, int);
 void		 window_pane_utmp_add(struct window_pane *);
 void		 window_pane_utmp_remove(struct window_pane *);
 void		 window_pane_wait_finish(struct window_pane *);

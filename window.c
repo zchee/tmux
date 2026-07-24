@@ -1499,6 +1499,7 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 	wp->sy = sy;
 
 	wp->pipe_fd = -1;
+	wp->oob_fd = -1;
 
 	wp->control_bg = -1;
 	wp->control_fg = -1;
@@ -1678,6 +1679,14 @@ window_pane_destroy(struct window_pane *wp)
 		close(wp->pipe_fd);
 		wp->pipe_fd = -1;
 	}
+	if (wp->oob_event != NULL) {
+		bufferevent_free(wp->oob_event);
+		wp->oob_event = NULL;
+	}
+	if (wp->oob_fd != -1) {
+		close(wp->oob_fd);
+		wp->oob_fd = -1;
+	}
 
 	if (event_initialized(&wp->resize_timer))
 		event_del(&wp->resize_timer);
@@ -1721,6 +1730,7 @@ window_pane_read_callback(__unused struct bufferevent *bufev, void *data)
 	size_t				 new_size;
 	struct client			*c;
 
+	wp->pty_reads++;
 	if (wp->pipe_fd != -1) {
 		new_data = window_pane_get_new_data(wp, wpo, &new_size);
 		if (new_size > 0) {
@@ -1735,7 +1745,77 @@ window_pane_read_callback(__unused struct bufferevent *bufev, void *data)
 			control_write_output(c, wp);
 	}
 	input_parse_pane(wp);
-	bufferevent_disable(wp->event, EV_READ);
+	window_pane_set_read(wp, 0);
+}
+
+static void
+window_pane_oob_failopen(struct window_pane *wp, const char *why)
+{
+	log_debug("%%%u pane OOB channel failed (%s), pty only", wp->id, why);
+	bufferevent_free(wp->oob_event);
+	wp->oob_event = NULL;
+	close(wp->oob_fd);
+	wp->oob_fd = -1;
+	wp->oob_broken = 1;
+}
+
+/*
+ * R3T M2: channel bytes go straight to the parser. A bufferevent's input
+ * buffer is add-frozen so they cannot be merged into wp->event->input;
+ * ordering is still a single domain (one event loop, parse-on-arrival for
+ * both sources) and the shared read-gate below covers both fds. Known
+ * limitation: pipe-pane and control-mode fanout see only pty bytes.
+ */
+static void
+window_pane_oob_read_callback(__unused struct bufferevent *bufev, void *data)
+{
+	struct window_pane	*wp = data;
+	struct evbuffer		*in = wp->oob_event->input;
+	size_t			 off, len;
+	int			 n;
+
+	while (wp->oob_hs > 0 && EVBUFFER_LENGTH(in) > 0) {
+		off = sizeof wp->oob_hsbuf - wp->oob_hs;
+		n = evbuffer_remove(in, wp->oob_hsbuf + off, wp->oob_hs);
+		if (n <= 0)
+			break;
+		wp->oob_hs -= n;
+		if (wp->oob_hs == 0 &&
+		    memcmp(wp->oob_hsbuf, "KOOB1\n", 6) != 0) {
+			window_pane_oob_failopen(wp, "bad handshake magic");
+			return;
+		}
+	}
+	if (wp->oob_hs == 0 && (len = EVBUFFER_LENGTH(in)) > 0) {
+		wp->oob_reads++;
+		wp->oob_bytes += len;
+		input_parse_buffer(wp, evbuffer_pullup(in, len), len);
+		evbuffer_drain(in, len);
+		window_pane_set_read(wp, 0);
+	}
+}
+
+static void
+window_pane_oob_error_callback(__unused struct bufferevent *bufev,
+    __unused short what, void *data)
+{
+	struct window_pane	*wp = data;
+
+	window_pane_oob_failopen(wp, "eof or error");
+}
+
+void
+window_pane_set_read(struct window_pane *wp, int on)
+{
+	if (on) {
+		bufferevent_enable(wp->event, EV_READ);
+		if (wp->oob_event != NULL)
+			bufferevent_enable(wp->oob_event, EV_READ);
+	} else {
+		bufferevent_disable(wp->event, EV_READ);
+		if (wp->oob_event != NULL)
+			bufferevent_disable(wp->oob_event, EV_READ);
+	}
 }
 
 static void
@@ -1763,6 +1843,24 @@ window_pane_set_event(struct window_pane *wp)
 	wp->ictx = input_init(wp, wp->event, &wp->palette);
 
 	bufferevent_enable(wp->event, EV_READ|EV_WRITE);
+
+	/* R3T M2: respawn calls here again -- drop any previous channel. */
+	if (wp->oob_event != NULL) {
+		bufferevent_free(wp->oob_event);
+		wp->oob_event = NULL;
+	}
+	if (wp->oob_fd != -1) {
+		setblocking(wp->oob_fd, 0);
+		wp->oob_hs = sizeof wp->oob_hsbuf;
+		wp->oob_broken = 0;
+		wp->oob_event = bufferevent_new(wp->oob_fd,
+		    window_pane_oob_read_callback, NULL,
+		    window_pane_oob_error_callback, wp);
+		if (wp->oob_event == NULL)
+			fatalx("out of memory");
+		bufferevent_set_max_single_read(wp->oob_event, 65536);
+		bufferevent_enable(wp->oob_event, EV_READ);
+	}
 }
 
 void

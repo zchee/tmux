@@ -2482,6 +2482,27 @@ format_cb_pane_id(struct format_tree *ft)
 	return (NULL);
 }
 
+/* Callback for pane_kitty_oob (R3T M2 pane-hop observability). */
+static void *
+format_cb_pane_kitty_oob(struct format_tree *ft)
+{
+	struct window_pane	*wp = ft->wp;
+	char			*s;
+
+	if (wp == NULL)
+		return (NULL);
+	if (wp->oob_event != NULL && wp->oob_hs == 0) {
+		xasprintf(&s, "armed r=%u b=%llu pty=%u", wp->oob_reads,
+		    (unsigned long long)wp->oob_bytes, wp->pty_reads);
+		return (s);
+	}
+	if (wp->oob_event != NULL)
+		return (xstrdup("offered"));
+	if (wp->oob_broken)
+		return (xstrdup("fallback"));
+	return (xstrdup("none"));
+}
+
 /* Callback for pane_index. */
 static void *
 format_cb_pane_index(struct format_tree *ft)
@@ -3936,6 +3957,9 @@ static const struct format_table_entry format_table[] = {
 	},
 	{ "pane_key_mode", FORMAT_TABLE_STRING,
 	  format_cb_pane_key_mode
+	},
+	{ "pane_kitty_oob", FORMAT_TABLE_STRING,
+	  format_cb_pane_kitty_oob
 	},
 	{ "pane_last", FORMAT_TABLE_STRING,
 	  format_cb_pane_last

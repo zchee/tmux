@@ -211,9 +211,13 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	}
 	unsetenv("KITTY_ENABLE_TUI_OOB");
 	/* global_environ was captured in main() before the fork; scrub the
-	 * struct too or every pane inherits the booby-trap variables. */
+	 * struct too or every pane inherits the booby-trap variables. An
+	 * inherited TMUX_TUI_OOB_FD (this server running inside another
+	 * tmux's pane) is equally stale here: panes get FRESH offers. */
 	environ_unset(global_environ, "KITTY_TUI_OOB_FD");
 	environ_unset(global_environ, "KITTY_ENABLE_TUI_OOB");
+	unsetenv("TMUX_TUI_OOB_FD");
+	environ_unset(global_environ, "TMUX_TUI_OOB_FD");
 
 	if (event_reinit(base) != 0)
 		fatalx("event_reinit failed");
