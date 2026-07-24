@@ -19,7 +19,9 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/un.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2795,6 +2797,68 @@ error:
 
 /* Handle identify message. */
 /*
+ * R3T M1: registry of channels this server has EVER handshaked, keyed by
+ * the socket's identity plus the kitty process that owns the peer end.
+ * A same-window re-attach dups the SAME socketpair (the kitty child's
+ * shell keeps it alive), and kitty's channel accepts only one handshake
+ * -- a second would be parsed as payload -- so a key hit arms without
+ * handshaking. Entries are purged on fail-open (kitty side died).
+ */
+struct kittyoob_reg {
+	dev_t				 dev;
+	ino_t				 ino;
+	pid_t				 pid;
+	TAILQ_ENTRY(kittyoob_reg)	 entry;
+};
+static TAILQ_HEAD(, kittyoob_reg) kittyoob_regs =
+    TAILQ_HEAD_INITIALIZER(kittyoob_regs);
+
+static int
+server_client_kittyoob_key(int fd, struct kittyoob_reg *key)
+{
+	struct stat	 sb;
+	pid_t		 pid = 0;
+	socklen_t	 pidlen = sizeof pid;
+
+	if (fstat(fd, &sb) != 0)
+		return (-1);
+#ifdef LOCAL_PEERPID
+	if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &pidlen) != 0)
+		pid = 0;
+#endif
+	key->dev = sb.st_dev;
+	key->ino = sb.st_ino;
+	key->pid = pid;
+	return (0);
+}
+
+static struct kittyoob_reg *
+server_client_kittyoob_find(const struct kittyoob_reg *key)
+{
+	struct kittyoob_reg	*reg;
+
+	TAILQ_FOREACH(reg, &kittyoob_regs, entry) {
+		if (reg->dev == key->dev && reg->ino == key->ino &&
+		    reg->pid == key->pid)
+			return (reg);
+	}
+	return (NULL);
+}
+
+void
+server_client_kittyoob_purge(int fd)
+{
+	struct kittyoob_reg	 key, *reg;
+
+	if (server_client_kittyoob_key(fd, &key) != 0)
+		return;
+	if ((reg = server_client_kittyoob_find(&key)) != NULL) {
+		TAILQ_REMOVE(&kittyoob_regs, reg, entry);
+		free(reg);
+	}
+}
+
+/*
  * R3T M0/M1: arm the kitty OOB bulk channel for a terminal client. The
  * 10-byte KOOB1 handshake must be the first bytes on the socket and must
  * complete before any tty output exists, so that while armed the ENTIRE
@@ -2812,6 +2876,7 @@ server_client_arm_kittyoob(struct client *c)
 				     0, 0, 0, 0 };
 	int			 type;
 	socklen_t		 typelen = sizeof type;
+	struct kittyoob_reg	 key, *reg;
 
 	if (c->oob_fd == -1)
 		return;
@@ -2823,11 +2888,25 @@ server_client_arm_kittyoob(struct client *c)
 		    c, c->oob_fd);
 		goto fail;
 	}
+	if (server_client_kittyoob_key(c->oob_fd, &key) != 0)
+		goto fail;
+	if (server_client_kittyoob_find(&key) != NULL) {
+		setblocking(c->oob_fd, 0);
+		c->oob_armed = 1;
+		log_debug("client %p KITTYOOB re-armed on fd %d (reused "
+		    "channel, no handshake)", c, c->oob_fd);
+		return;
+	}
 	if (write(c->oob_fd, hs, sizeof hs) != sizeof hs) {
 		log_debug("client %p KITTYOOB handshake failed: %s", c,
 		    strerror(errno));
 		goto fail;
 	}
+	reg = xcalloc(1, sizeof *reg);
+	reg->dev = key.dev;
+	reg->ino = key.ino;
+	reg->pid = key.pid;
+	TAILQ_INSERT_TAIL(&kittyoob_regs, reg, entry);
 	setblocking(c->oob_fd, 0);
 	c->oob_armed = 1;
 	log_debug("client %p KITTYOOB armed on fd %d", c, c->oob_fd);

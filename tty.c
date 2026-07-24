@@ -288,6 +288,7 @@ tty_oob_failopen(struct tty *tty)
 	    c->name, strerror(errno));
 	if (event_initialized(&tty->event_oob))
 		event_del(&tty->event_oob);
+	server_client_kittyoob_purge(c->oob_fd);
 	close(c->oob_fd);
 	c->oob_fd = -1;
 	c->oob_armed = 0;
