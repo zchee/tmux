@@ -258,6 +258,8 @@ tty_out_fd(struct tty *tty)
 {
 	struct client	*c = tty->client;
 
+	if (c->oob_fd != -1 && !c->oob_armed)
+		server_client_arm_kittyoob(c);
 	if (c->oob_armed && c->oob_fd != -1)
 		return (c->oob_fd);
 	return (c->fd);

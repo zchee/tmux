@@ -3338,6 +3338,7 @@ int	 server_client_open(struct client *, char **);
 void	 server_client_unref(struct client *);
 void	 server_client_set_session(struct client *, struct session *);
 void	 server_client_lost(struct client *);
+void	 server_client_arm_kittyoob(struct client *);
 void	 server_client_suspend(struct client *);
 void	 server_client_detach(struct client *, enum msgtype);
 void	 server_client_exec(struct client *, const char *);

@@ -459,6 +459,16 @@ const struct options_table_entry options_table[] = {
 		  "Empty does not write a history file."
 	},
 
+	{ .name = "kitty-oob",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 1,
+	  .text = "Whether to use kitty's out-of-band bulk channel for client "
+		  "tty output when the attaching client offers one "
+		  "(KITTY_TUI_OOB_FD). Kill switch; the channel itself is "
+		  "opt-in on the kitty side."
+	},
+
 	{ .name = "input-buffer-size",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SERVER,

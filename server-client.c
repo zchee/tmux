@@ -50,7 +50,6 @@ static int	server_client_handle_dead_key(struct window_pane *, key_code);
 static void	server_client_dispatch(struct imsg *, void *);
 static int	server_client_dispatch_command(struct client *, struct imsg *);
 static int	server_client_dispatch_identify(struct client *, struct imsg *);
-static void	server_client_arm_kittyoob(struct client *);
 static int	server_client_dispatch_shell(struct client *);
 static void	server_client_report_theme(struct client *, enum client_theme);
 
@@ -2796,13 +2795,17 @@ error:
 
 /* Handle identify message. */
 /*
- * R3T M0: arm the kitty OOB bulk channel for a terminal client. The
+ * R3T M0/M1: arm the kitty OOB bulk channel for a terminal client. The
  * 10-byte KOOB1 handshake must be the first bytes on the socket and must
  * complete before any tty output exists, so that while armed the ENTIRE
  * output stream rides the channel (single-stream ordering) and the pty
- * carries only input/signals/winsize.
+ * carries only input/signals/winsize. Called lazily from the first tty
+ * output attempt (tty_out_fd) rather than at identify time so that the
+ * kitty-oob option -- loaded from the configuration file after identify
+ * -- governs even the server-starting client. Failure closes the fd,
+ * which is the sticky never-retry marker.
  */
-static void
+void
 server_client_arm_kittyoob(struct client *c)
 {
 	static const char	 hs[10] = { 'K', 'O', 'O', 'B', '1', '\n',
@@ -2812,6 +2815,8 @@ server_client_arm_kittyoob(struct client *c)
 
 	if (c->oob_fd == -1)
 		return;
+	if (!options_get_number(global_options, "kitty-oob"))
+		goto fail;
 	if (getsockopt(c->oob_fd, SOL_SOCKET, SO_TYPE, &type, &typelen) != 0 ||
 	    type != SOCK_STREAM) {
 		log_debug("client %p KITTYOOB fd %d is not a stream socket",
@@ -2968,14 +2973,16 @@ server_client_dispatch_identify(struct client *c, struct imsg *imsg)
 		} else {
 			tty_resize(&c->tty);
 			c->flags |= CLIENT_TERMINAL;
-			server_client_arm_kittyoob(c);
 		}
 		if (c->out_fd != -1)
 			close(c->out_fd);
 		c->out_fd = -1;
 	}
-	/* R3T M0: control clients and failed tty inits never arm. */
-	if (c->oob_fd != -1 && !c->oob_armed) {
+	/*
+	 * R3T M0/M1: control clients and failed tty inits never arm.
+	 * Terminal clients keep the fd for the lazy arm at first output.
+	 */
+	if (c->oob_fd != -1 && !(c->flags & CLIENT_TERMINAL)) {
 		close(c->oob_fd);
 		c->oob_fd = -1;
 	}
