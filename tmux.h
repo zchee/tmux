@@ -2240,6 +2240,7 @@ struct client {
 	/* R3T M0: kitty OOB bulk channel (opt-in, terminal clients only). */
 	int			 oob_fd;
 	int			 oob_armed;
+	int			 oob_failopens;
 	struct event		 event;
 	int			 retval;
 

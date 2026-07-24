@@ -1640,6 +1640,26 @@ format_cb_client_last_session(struct format_tree *ft)
 	return (NULL);
 }
 
+/* Callback for client_kitty_oob (R3T M1 soak observability). */
+static void *
+format_cb_client_kitty_oob(struct format_tree *ft)
+{
+	struct client	*c = ft->c;
+	char		*s;
+
+	if (c == NULL)
+		return (NULL);
+	if (c->oob_armed)
+		return (xstrdup("armed"));
+	if (c->oob_failopens > 0) {
+		xasprintf(&s, "fallback:%d", c->oob_failopens);
+		return (s);
+	}
+	if (!options_get_number(global_options, "kitty-oob"))
+		return (xstrdup("off"));
+	return (xstrdup("none"));
+}
+
 /* Callback for client_name. */
 static void *
 format_cb_client_name(struct format_tree *ft)
@@ -3658,6 +3678,9 @@ static const struct format_table_entry format_table[] = {
 	},
 	{ "client_key_table", FORMAT_TABLE_STRING,
 	  format_cb_client_key_table
+	},
+	{ "client_kitty_oob", FORMAT_TABLE_STRING,
+	  format_cb_client_kitty_oob
 	},
 	{ "client_last_session", FORMAT_TABLE_STRING,
 	  format_cb_client_last_session

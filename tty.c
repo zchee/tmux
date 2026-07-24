@@ -292,6 +292,7 @@ tty_oob_failopen(struct tty *tty)
 	close(c->oob_fd);
 	c->oob_fd = -1;
 	c->oob_armed = 0;
+	c->oob_failopens++;
 }
 
 static void
