@@ -2497,10 +2497,12 @@ format_cb_pane_kitty_oob(struct format_tree *ft)
 		return (s);
 	}
 	if (wp->oob_event != NULL)
-		return (xstrdup("offered"));
-	if (wp->oob_broken)
-		return (xstrdup("fallback"));
-	return (xstrdup("none"));
+		xasprintf(&s, "offered pty=%u", wp->pty_reads);
+	else if (wp->oob_broken)
+		xasprintf(&s, "fallback pty=%u", wp->pty_reads);
+	else
+		xasprintf(&s, "none pty=%u", wp->pty_reads);
+	return (s);
 }
 
 /* Callback for pane_index. */
