@@ -1810,6 +1810,8 @@ struct tty {
 	struct event	 event_in;
 	struct evbuffer	*in;
 	struct event	 event_out;
+	/* R3T M1: writability event for the kitty OOB channel fd. */
+	struct event	 event_oob;
 	struct evbuffer	*out;
 	struct event	 timer;
 	size_t		 discarded;

@@ -265,6 +265,17 @@ tty_out_fd(struct tty *tty)
 	return (c->fd);
 }
 
+/* R3T M1: writability waits must watch whichever fd output rides on. */
+static struct event *
+tty_out_event(struct tty *tty)
+{
+	struct client	*c = tty->client;
+
+	if (c->oob_armed && c->oob_fd != -1)
+		return (&tty->event_oob);
+	return (&tty->event_out);
+}
+
 /* R3T M0 sticky fail-open: the channel died; fall back to the tty for
  * good. Unwritten bytes stay buffered, so output resumes on c->fd at the
  * exact unwritten offset. Never re-arms. */
@@ -275,6 +286,8 @@ tty_oob_failopen(struct tty *tty)
 
 	log_debug("%s: kitty OOB channel failed (%s), falling back to tty",
 	    c->name, strerror(errno));
+	if (event_initialized(&tty->event_oob))
+		event_del(&tty->event_oob);
 	close(c->oob_fd);
 	c->oob_fd = -1;
 	c->oob_armed = 0;
@@ -290,11 +303,15 @@ tty_write_callback(__unused int fd, __unused short events, void *data)
 
 	nwrite = evbuffer_write(tty->out, tty_out_fd(tty));
 	if (nwrite == -1) {
-		if (c->oob_armed && errno != EAGAIN && errno != EINTR) {
+		if (c->oob_armed) {
+			if (errno == EAGAIN || errno == EINTR) {
+				event_add(tty_out_event(tty), NULL);
+				return;
+			}
 			tty_oob_failopen(tty);
-			if (EVBUFFER_LENGTH(tty->out) != 0)
-				event_add(&tty->event_out, NULL);
 		}
+		if (EVBUFFER_LENGTH(tty->out) != 0)
+			event_add(tty_out_event(tty), NULL);
 		return;
 	}
 	log_debug("%s: wrote %d bytes (of %zu)", c->name, nwrite, size);
@@ -310,7 +327,7 @@ tty_write_callback(__unused int fd, __unused short events, void *data)
 		return;
 
 	if (EVBUFFER_LENGTH(tty->out) != 0)
-		event_add(&tty->event_out, NULL);
+		event_add(tty_out_event(tty), NULL);
 }
 
 int
@@ -339,6 +356,9 @@ tty_open(struct tty *tty, char **cause)
 		fatal("out of memory");
 
 	event_set(&tty->event_out, c->fd, EV_WRITE, tty_write_callback, tty);
+	if (c->oob_fd != -1)
+		event_set(&tty->event_oob, c->oob_fd, EV_WRITE,
+		    tty_write_callback, tty);
 	tty->out = evbuffer_new();
 	if (tty->out == NULL)
 		fatal("out of memory");
@@ -514,6 +534,8 @@ tty_stop_tty(struct tty *tty)
 
 	event_del(&tty->event_in);
 	event_del(&tty->event_out);
+	if (event_initialized(&tty->event_oob))
+		event_del(&tty->event_oob);
 
 	/*
 	 * Be flexible about error handling and try not kill the server just
@@ -581,6 +603,8 @@ tty_close(struct tty *tty)
 		event_del(&tty->event_in);
 		evbuffer_free(tty->out);
 		event_del(&tty->event_out);
+		if (event_initialized(&tty->event_oob))
+			event_del(&tty->event_oob);
 
 		tty_term_free(tty->term);
 		tty_keys_free(tty);
@@ -716,8 +740,8 @@ tty_add(struct tty *tty, const char *buf, size_t len)
 	if (tty_log_fd != -1)
 		write(tty_log_fd, buf, len);
 	if ((tty->flags & TTY_STARTED) &&
-	    !event_pending(&tty->event_out, EV_WRITE, NULL))
-		event_add(&tty->event_out, NULL);
+	    !event_pending(tty_out_event(tty), EV_WRITE, NULL))
+		event_add(tty_out_event(tty), NULL);
 }
 
 void
