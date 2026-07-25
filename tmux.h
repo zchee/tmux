@@ -1403,8 +1403,6 @@ struct window_pane {
 	/* R3T M2: kitty OOB bulk channel offered to the pane child. */
 	int		 oob_fd;
 	struct bufferevent *oob_event;
-	size_t		 oob_hs;	/* handshake bytes still expected */
-	u_char		 oob_hsbuf[10];
 	int		 oob_broken;
 	u_int		 oob_reads;
 	uint64_t	 oob_bytes;

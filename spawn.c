@@ -485,7 +485,7 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	/*
 	 * R3T M2: offer the pane a kitty OOB bulk channel. The child end is
 	 * dup2'd to fd 3 between fork and closefrom, so TMUX_TUI_OOB_FD can
-	 * be a static "3". A pane that never handshakes costs one idle
+	 * be a static "3". A pane that never uses the channel costs one idle
 	 * socketpair; a respawn drops any previous channel first.
 	 */
 	if (new_wp->oob_fd != -1) {

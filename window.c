@@ -1771,22 +1771,9 @@ window_pane_oob_read_callback(__unused struct bufferevent *bufev, void *data)
 {
 	struct window_pane	*wp = data;
 	struct evbuffer		*in = wp->oob_event->input;
-	size_t			 off, len;
-	int			 n;
+	size_t			 len;
 
-	while (wp->oob_hs > 0 && EVBUFFER_LENGTH(in) > 0) {
-		off = sizeof wp->oob_hsbuf - wp->oob_hs;
-		n = evbuffer_remove(in, wp->oob_hsbuf + off, wp->oob_hs);
-		if (n <= 0)
-			break;
-		wp->oob_hs -= n;
-		if (wp->oob_hs == 0 &&
-		    memcmp(wp->oob_hsbuf, "KOOB1\n", 6) != 0) {
-			window_pane_oob_failopen(wp, "bad handshake magic");
-			return;
-		}
-	}
-	if (wp->oob_hs == 0 && (len = EVBUFFER_LENGTH(in)) > 0) {
+	if ((len = EVBUFFER_LENGTH(in)) > 0) {
 		wp->oob_reads++;
 		wp->oob_bytes += len;
 		input_parse_buffer(wp, evbuffer_pullup(in, len), len);
@@ -1851,7 +1838,6 @@ window_pane_set_event(struct window_pane *wp)
 	}
 	if (wp->oob_fd != -1) {
 		setblocking(wp->oob_fd, 0);
-		wp->oob_hs = sizeof wp->oob_hsbuf;
 		wp->oob_broken = 0;
 		wp->oob_event = bufferevent_new(wp->oob_fd,
 		    window_pane_oob_read_callback, NULL,
