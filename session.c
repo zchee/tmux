@@ -249,6 +249,7 @@ void
 session_update_activity(struct session *s, struct timeval *from)
 {
 	struct timeval	 tv;
+	long long	 lock;
 
 	if (from == NULL)
 		gettimeofday(&s->activity_time, NULL);
@@ -265,9 +266,11 @@ session_update_activity(struct session *s, struct timeval *from)
 		evtimer_set(&s->lock_timer, session_lock_timer, s);
 
 	if (s->attached != 0) {
+		lock = options_get_number(s->options, "lock-after-time");
 		timerclear(&tv);
-		tv.tv_sec = options_get_number(s->options, "lock-after-time");
-		if (tv.tv_sec != 0)
+		tv.tv_sec = lock / 1000;
+		tv.tv_usec = (lock % 1000) * 1000;
+		if (lock != 0)
 			evtimer_add(&s->lock_timer, &tv);
 	}
 }

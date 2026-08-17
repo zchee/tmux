@@ -4680,6 +4680,31 @@ options, the
 .Sx STYLES
 section.
 .Pp
+.Em Number Ns -type
+options which hold a length of time accept an optional unit after the value:
+.Ic ms
+(milliseconds),
+.Ic s
+(seconds),
+.Ic m
+(minutes) or
+.Ic h
+(hours).
+Without a unit the value is in the unit shown for the option by
+.Ic customize\-mode ,
+which is milliseconds for most options but seconds for
+.Ic lock\-after\-time
+and
+.Ic status\-interval ;
+so, for example,
+.Ql set \-g status\-interval 500ms
+updates the status line twice a second while
+.Ql set \-g status\-interval 5
+updates it every five seconds.
+.Ic show\-options
+prints such a value in the option's own unit if it can be given exactly in it
+and in milliseconds otherwise.
+.Pp
 The
 .Nm
 server has a set of global server options which do not apply to any particular

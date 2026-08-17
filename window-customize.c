@@ -670,6 +670,26 @@ window_customize_build_array(struct window_customize_modedata *data,
 	return (count);
 }
 
+/*
+ * Get the unit to show after an option value. Time options write their own
+ * unit when the value cannot be given in the default one, so there is nothing
+ * to add in that case.
+ */
+static const char *
+window_customize_unit(const struct options_table_entry *oe, const char *value,
+    const char **space)
+{
+	const char	*unit;
+
+	unit = options_value_unit(oe, value);
+	if (unit == NULL) {
+		*space = "";
+		return ("");
+	}
+	*space = " ";
+	return (unit);
+}
+
 static u_int
 window_customize_build_option(struct window_customize_modedata *data,
     struct mode_tree_item *top, enum window_customize_scope scope,
@@ -680,6 +700,7 @@ window_customize_build_option(struct window_customize_modedata *data,
 	const struct options_table_entry	*oe = options_table_entry(o);
 	struct options				*oo = options_owner(o);
 	const char				*name = options_name(o);
+	const char				*unit;
 	struct window_customize_itemdata	*item;
 	char					*text, *expanded, *value;
 	int					 global = 0, array = 0;
@@ -726,11 +747,6 @@ window_customize_build_option(struct window_customize_modedata *data,
 	format_add(ft, "option_scope", "%s", text);
 	free(text);
 
-	if (oe != NULL && oe->unit != NULL)
-		format_add(ft, "option_unit", "%s", oe->unit);
-	else
-		format_add(ft, "option_unit", "%s", "");
-
 	if (is_monitor) {
 		value = hooks_monitor_to_string(o);
 		if (value != NULL) {
@@ -744,8 +760,11 @@ window_customize_build_option(struct window_customize_modedata *data,
 	if (!array) {
 		value = options_to_string(o, NULL, 0);
 		format_add(ft, "option_value", "%s", value);
+		unit = options_value_unit(oe, value);
 		free(value);
-	}
+	} else
+		unit = options_value_unit(oe, NULL);
+	format_add(ft, "option_unit", "%s", unit == NULL ? "" : unit);
 
 	if (filter != NULL) {
 		expanded = format_expand(ft, filter);
@@ -1235,10 +1254,6 @@ window_customize_draw_option(struct window_customize_modedata *data,
 	is_user_hook = (*name == '@' && hooks_is_event(name));
 	is_any_hook = (is_hook || is_monitor || is_user_hook);
 
-	if (oe != NULL && oe->unit != NULL) {
-		space = " ";
-		unit = oe->unit;
-	}
 	ft = format_create_from_state(NULL, NULL, &fs);
 
 	if (oe == NULL || oe->text == NULL) {
@@ -1328,6 +1343,7 @@ monitor:
 		goto out;
 
 	value = options_to_string(o, array_key, 0);
+	unit = window_customize_unit(oe, value, &space);
 	if (oe != NULL && array_key == NULL) {
 		default_value = options_default_to_string(oe);
 		if (strcmp(default_value, value) == 0) {
@@ -1399,6 +1415,7 @@ monitor:
 			goto out;
 	}
 	if (default_value != NULL) {
+		unit = window_customize_unit(oe, default_value, &space);
 		if (!window_customize_write_value(ctx, cx, sx, sy - (s->cy - cy),
 		    0, "The default is: ", "%s%s%s", default_value, space, unit))
 			goto out;
@@ -1432,6 +1449,7 @@ monitor:
 		if (parent != NULL) {
 			free(value);
 			value = options_to_string(parent, NULL, 0);
+			unit = window_customize_unit(oe, value, &space);
 			xsnprintf(label, sizeof label,
 			    "Window value (from window %u): ", fs.wl->idx);
 			if (!window_customize_write_value(ctx, s->cx, sx,
@@ -1445,6 +1463,7 @@ monitor:
 		if (parent != NULL) {
 			free(value);
 			value = options_to_string(parent, NULL, 0);
+			unit = window_customize_unit(oe, value, &space);
 			if (!window_customize_write_value(ctx, s->cx, sx,
 			    sy - (s->cy - cy), 0, "Global value: ", "%s%s%s",
 			    value, space, unit))

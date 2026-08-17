@@ -184,6 +184,135 @@ options_value_free(struct options_entry *o, union options_value *ov)
 		cmd_list_free(ov->cmdlist);
 }
 
+/*
+ * Time options are stored in milliseconds. A value written without a unit is
+ * in the unit named by the table entry, so options which have always been
+ * documented in seconds keep working with existing configuration.
+ */
+static const struct {
+	const char	*name;
+	long long	 scale;
+} options_time_units[] = {
+	{ "ms", 1 },
+	{ "millisecond", 1 },
+	{ "milliseconds", 1 },
+	{ "s", 1000 },
+	{ "second", 1000 },
+	{ "seconds", 1000 },
+	{ "m", 60 * 1000LL },
+	{ "minute", 60 * 1000LL },
+	{ "minutes", 60 * 1000LL },
+	{ "h", 3600 * 1000LL },
+	{ "hour", 3600 * 1000LL },
+	{ "hours", 3600 * 1000LL }
+};
+
+/* Look up a time unit, returning zero if it is not known. */
+static long long
+options_time_lookup(const char *unit)
+{
+	u_int	i;
+
+	for (i = 0; i < nitems(options_time_units); i++) {
+		if (strcasecmp(options_time_units[i].name, unit) == 0)
+			return (options_time_units[i].scale);
+	}
+	return (0);
+}
+
+/* Milliseconds in the unit a time option is written in by default. */
+static long long
+options_time_default_scale(const struct options_table_entry *oe)
+{
+	long long	scale;
+
+	if (oe->unit == NULL || (scale = options_time_lookup(oe->unit)) == 0)
+		return (1);
+	return (scale);
+}
+
+/*
+ * Convert a time option to a string. The default unit is used if the value can
+ * be given exactly in it, otherwise the value is written in milliseconds.
+ */
+static char *
+options_time_to_string(const struct options_table_entry *oe, long long number)
+{
+	long long	 scale;
+	char		*s;
+
+	scale = options_time_default_scale(oe);
+	if (scale != 1 && number % scale != 0)
+		xasprintf(&s, "%lldms", number);
+	else
+		xasprintf(&s, "%lld", number / scale);
+	return (s);
+}
+
+/* Convert a string with an optional unit suffix to a time in milliseconds. */
+static int
+options_time_from_string(const struct options_table_entry *oe,
+    const char *value, long long *number, char **cause)
+{
+	const char	*errstr, *cp = value, *suffix;
+	char		*digits;
+	long long	 n, scale;
+
+	while (*cp == ' ' || *cp == '\t')
+		cp++;
+	suffix = cp + strspn(cp, "+-0123456789");
+	if (suffix == cp) {
+		xasprintf(cause, "value is invalid: %s", value);
+		return (-1);
+	}
+	digits = xstrndup(cp, suffix - cp);
+
+	while (*suffix == ' ' || *suffix == '\t')
+		suffix++;
+	if (*suffix == '\0')
+		scale = options_time_default_scale(oe);
+	else if ((scale = options_time_lookup(suffix)) == 0) {
+		xasprintf(cause, "unknown time unit: %s", suffix);
+		free(digits);
+		return (-1);
+	}
+
+	/* Bound the number before scaling so the multiplication cannot wrap. */
+	n = strtonum(digits, 0, oe->maximum / scale, &errstr);
+	free(digits);
+	if (errstr != NULL) {
+		xasprintf(cause, "value is %s: %s", errstr, value);
+		return (-1);
+	}
+	n *= scale;
+	if (n < (long long)oe->minimum) {
+		xasprintf(cause, "value is too small: %s", value);
+		return (-1);
+	}
+
+	*number = n;
+	return (0);
+}
+
+/*
+ * Get the unit to show after an option value, or NULL if the value already
+ * says what unit it is in.
+ */
+const char *
+options_value_unit(const struct options_table_entry *oe, const char *value)
+{
+	if (oe == NULL || oe->unit == NULL)
+		return (NULL);
+	if (oe->flags & OPTIONS_TABLE_IS_TIME) {
+		if (value == NULL)
+			return (NULL);
+		value += strspn(value, " \t+-0123456789");
+		if (*value != '\0')
+			return (NULL);
+	}
+	return (oe->unit);
+}
+
 static char *
 options_value_to_string(struct options_entry *o, union options_value *ov,
     int numeric)
@@ -195,7 +324,11 @@ options_value_to_string(struct options_entry *o, union options_value *ov,
 	if (OPTIONS_IS_NUMBER(o)) {
 		switch (o->tableentry->type) {
 		case OPTIONS_TABLE_NUMBER:
-			xasprintf(&s, "%lld", ov->number);
+			if (o->tableentry->flags & OPTIONS_TABLE_IS_TIME)
+				s = options_time_to_string(o->tableentry,
+				    ov->number);
+			else
+				xasprintf(&s, "%lld", ov->number);
 			break;
 		case OPTIONS_TABLE_KEY:
 			s = xstrdup(key_string_lookup_key(ov->number, 0));
@@ -366,7 +499,10 @@ options_default_to_string(const struct options_table_entry *oe)
 		s = xstrdup(oe->default_str);
 		break;
 	case OPTIONS_TABLE_NUMBER:
-		xasprintf(&s, "%lld", oe->default_num);
+		if (oe->flags & OPTIONS_TABLE_IS_TIME)
+			s = options_time_to_string(oe, oe->default_num);
+		else
+			xasprintf(&s, "%lld", oe->default_num);
 		break;
 	case OPTIONS_TABLE_KEY:
 		s = xstrdup(key_string_lookup_key(oe->default_num, 0));
@@ -1314,10 +1450,18 @@ options_from_string(struct options *oo, const struct options_table_entry *oe,
 		free(old);
 		return (0);
 	case OPTIONS_TABLE_NUMBER:
-		number = strtonum(value, oe->minimum, oe->maximum, &errstr);
-		if (errstr != NULL) {
-			xasprintf(cause, "value is %s: %s", errstr, value);
-			return (-1);
+		if (oe->flags & OPTIONS_TABLE_IS_TIME) {
+			if (options_time_from_string(oe, value, &number,
+			    cause) != 0)
+				return (-1);
+		} else {
+			number = strtonum(value, oe->minimum, oe->maximum,
+			    &errstr);
+			if (errstr != NULL) {
+				xasprintf(cause, "value is %s: %s", errstr,
+				    value);
+				return (-1);
+			}
 		}
 		options_set_number(oo, name, number);
 		return (0);

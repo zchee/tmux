@@ -2492,6 +2492,7 @@ enum options_table_type {
 #define OPTIONS_TABLE_IS_HOOK 0x2
 #define OPTIONS_TABLE_IS_STYLE 0x4
 #define OPTIONS_TABLE_IS_COLOUR 0x8
+#define OPTIONS_TABLE_IS_TIME 0x10
 
 struct options_table_entry {
 	const char		 *name;
@@ -2839,6 +2840,8 @@ struct options_entry *options_empty(struct options *,
 struct options_entry *options_default(struct options *,
 		     const struct options_table_entry *);
 char		*options_default_to_string(const struct options_table_entry *);
+const char	*options_value_unit(const struct options_table_entry *,
+		     const char *);
 const char	*options_name(struct options_entry *);
 struct options	*options_owner(struct options_entry *);
 void		*options_get_monitor_data(struct options_entry *);
