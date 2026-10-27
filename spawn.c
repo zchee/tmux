@@ -257,7 +257,7 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	const char		 *cmd, *tmp, *home = find_home();
 	int			  oob_pair[2] = { -1, -1 };
 	const char		 *actual_cwd = NULL;
-	int			  argc;
+	int			  argc, retries;
 	u_int			  idx;
 	struct termios		  now;
 	u_int			  hlimit;
@@ -500,7 +500,14 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	}
 
 	/* Fork the new process. */
-	new_wp->pid = fdforkpty(ptm_fd, &new_wp->fd, new_wp->tty, NULL, &ws);
+	for (retries = 0; ; retries++) {
+		new_wp->pid = fdforkpty(ptm_fd, &new_wp->fd, new_wp->tty, NULL,
+		    &ws);
+		if (new_wp->pid != -1 || errno != ENXIO || retries == 10)
+			break;
+		/* macOS may race the ptmx slot table after closing the master. */
+		usleep(20000);
+	}
 	if (new_wp->pid == -1) {
 		xasprintf(cause, "fork failed: %s", strerror(errno));
 		new_wp->fd = -1;
